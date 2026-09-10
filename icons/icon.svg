@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Conti di casa">
+  <rect width="512" height="512" rx="96" fill="#2C6E6A"/>
+  <path d="M126 160h260v232H126z" fill="#fff" opacity=".95"/>
+  <path d="M160 208h192M160 264h192M160 320h112" stroke="#2C6E6A" stroke-width="24" stroke-linecap="round"/>
+  <circle cx="352" cy="320" r="48" fill="#9C4A6E"/>
+  <path d="M336 320h32M352 304v32" stroke="#fff" stroke-width="14" stroke-linecap="round"/>
+</svg>

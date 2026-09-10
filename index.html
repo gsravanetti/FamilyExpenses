@@ -1,0 +1,2881 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light">
+<meta name="theme-color" content="#EDEFF2">
+<meta name="description" content="Dashboard privata delle spese familiari.">
+<!-- CSP di difesa in profondità. GitHub Pages non consente di aggiungere
+     frame-ancestors qui: per quello serve un header HTTP lato hosting. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'self'; object-src 'none'; form-action 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline' https://accounts.google.com; connect-src 'self' https://sheets.googleapis.com https://accounts.google.com; frame-src https://accounts.google.com; manifest-src 'self'; worker-src 'self'">
+<link rel="manifest" href="./manifest.webmanifest">
+<link rel="icon" href="./icons/icon.svg" type="image/svg+xml">
+<!-- Safari iOS usa ancora questa icona PNG per “Aggiungi a Home”. -->
+<link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">
+<title>Conti di casa — 2026</title>
+<!-- Libreria ufficiale Google per ottenere un token OAuth temporaneo.
+     Il Client ID usato più sotto NON è un segreto e può stare nel codice. -->
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<!--
+  ============================================================================
+  CONTI DI CASA — dashboard di finanza familiare
+  ----------------------------------------------------------------------------
+  PWA privata: la dashboard è pubblicabile anche su GitHub Pages, ma i dati
+  restano in un Google Sheet con condivisione "Limitata". L'accesso avviene
+  con OAuth Google; non c'è alcuna API key nel codice.
+
+  Struttura del file, dall'alto in basso:
+    1. Stili
+    2. Markup dell'applicazione
+    3. XlsxReader  — lettore .xlsx offline (unzip + inflate + parser XML),
+                     usato solo se riattivi il caricamento da file locale
+                     (vedi "FILE-LOCALE-DISATTIVATO" più sotto)
+    4. CONFIG      — nomi fogli/colonne e regole di ripartizione
+    5. Model       — normalizzazione dati e aggregazioni (funzioni pure)
+    6. Charts      — grafici SVG scritti a mano
+    7. App         — stato, filtri, viste
+    8. GoogleAuth + GSheetsApi + DataSource — accesso autenticato al Google
+                     Sheet tramite Google Identity Services e Sheets API.
+
+  NOTA — caricamento dati: la pagina chiede un accesso Google esplicito e poi
+  legge un Google Sheet privato. Il token vive soltanto nella memoria della
+  scheda del browser: non viene scritto in localStorage, IndexedDB o cache.
+  ============================================================================
+-->
+<style>
+:root{
+  --bg:#EDEFF2;
+  --surface:#FFFFFF;
+  --surface-2:#F6F7F9;
+  --line:#DCE1E7;
+  --line-soft:#E9EDF1;
+  --ink:#15202B;
+  --ink-soft:#5C6B7A;
+  --ink-faint:#8C99A6;
+
+  --jack:#2C6E6A;
+  --otti:#9C4A6E;
+  --tot:#3D4C5A;
+
+  --over:#B0442E;      /* speso più del budget */
+  --under:#2F7A57;     /* speso meno del budget */
+  --cantiere:#5A6472;
+
+  --radius:10px;
+  --radius-sm:7px;
+  --shadow:0 1px 2px rgba(21,32,43,.06), 0 6px 18px rgba(21,32,43,.05);
+
+  /* Altezza comune a tabelle e grafici: ~15 righe di tabella prima dello
+     scorrimento. Su schermi piccoli viene ridotta (vedi media query). */
+  --panelh:540px;
+
+  --serif:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,"Times New Roman",serif;
+  --sans:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+}
+
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  background:var(--bg);
+  color:var(--ink);
+  font-family:var(--sans);
+  font-size:15px;
+  line-height:1.45;
+  -webkit-text-size-adjust:100%;
+  padding-bottom:48px;
+}
+button{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--ink);outline-offset:2px;border-radius:4px}
+
+.wrap{max-width:1080px;margin:0 auto;padding:0 14px}
+
+/* ---------- testata ------------------------------------------------------ */
+.top{
+  position:sticky;top:0;z-index:30;
+  background:rgba(237,239,242,.94);
+  backdrop-filter:saturate(160%) blur(8px);
+  border-bottom:1px solid var(--line);
+}
+.top-in{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:10px 0 8px}
+.brand{display:flex;flex-direction:column;margin-right:auto;min-width:0}
+.brand h1{
+  font-family:var(--serif);font-size:1.4rem;font-weight:600;
+  letter-spacing:-.01em;margin:0;line-height:1.1;
+}
+.brand .meta{font-size:.74rem;color:var(--ink-faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+/* segmentato persona */
+.seg{display:inline-flex;background:var(--surface);border:1px solid var(--line);border-radius:999px;padding:3px;gap:2px}
+.seg button{
+  border:0;background:transparent;padding:6px 15px;border-radius:999px;
+  font-size:.85rem;font-weight:600;cursor:pointer;color:var(--ink-soft);
+  transition:background .12s,color .12s;
+}
+.seg button[aria-pressed="true"]{background:var(--tot);color:#fff}
+.seg button[data-p="jack"][aria-pressed="true"]{background:var(--jack)}
+.seg button[data-p="otti"][aria-pressed="true"]{background:var(--otti)}
+
+/* toggle ristrutturazione */
+.toggle{display:inline-flex;align-items:center;gap:7px;font-size:.85rem;font-weight:600;color:var(--ink-soft)}
+.toggle input{display:none}
+.toggle .track{
+  width:36px;height:20px;border-radius:99px;background:var(--line);position:relative;
+  cursor:pointer;transition:background .15s;flex-shrink:0;
+}
+.toggle input:checked + .track{background:var(--cantiere)}
+.toggle .track::after{
+  content:'';position:absolute;left:2px;top:2px;width:16px;height:16px;border-radius:50%;
+  background:#fff;transition:transform .15s;
+}
+.toggle input:checked + .track::after{transform:translateX(16px)}
+
+.btn{
+  border:1px solid var(--line);background:var(--surface);color:var(--ink);
+  padding:7px 13px;border-radius:var(--radius-sm);font-size:.85rem;font-weight:600;
+  cursor:pointer;white-space:nowrap;
+}
+.btn:hover{background:var(--surface-2)}
+.btn.ghost{background:transparent}
+.btn.solid{background:var(--ink);color:#fff;border-color:var(--ink)}
+.btn.small{padding:4px 10px;font-size:.78rem;font-weight:600}
+.btn[disabled]{opacity:.45;cursor:default;pointer-events:none}
+
+/* colori grafico savings/overrun */
+.chart .bar-saving{opacity:.7}
+.chart .overrun-label{font-size:10px;font-weight:700;fill:var(--over)}
+.chart .saving-label{font-size:10px;font-weight:700;fill:var(--under)}
+.chart .sep{stroke:var(--line);stroke-width:1;stroke-dasharray:3 3}
+.chart .toplabel{font-size:10px;font-weight:700;fill:var(--ink-soft)}
+.chart .inlabel{font-size:10px;font-weight:700;fill:#fff}
+
+/* modale google sheet */
+.modal-bg{
+  position:fixed;inset:0;z-index:100;background:rgba(21,32,43,.35);
+  display:flex;align-items:center;justify-content:center;padding:16px;
+}
+.modal{
+  background:var(--surface);border-radius:var(--radius);max-width:520px;width:100%;
+  padding:24px;box-shadow:0 12px 40px rgba(21,32,43,.18);
+}
+.modal h3{font-family:var(--serif);font-size:1.15rem;margin:0 0 6px}
+.modal p{color:var(--ink-soft);font-size:.86rem;margin:0 0 14px;line-height:1.5}
+.modal input[type="url"],.modal input[type="text"]{
+  width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:var(--radius-sm);
+  font:inherit;font-size:.88rem;margin-bottom:12px;box-sizing:border-box;
+}
+.modal .btns{display:flex;gap:8px;justify-content:flex-end}
+.modal code{background:var(--surface-2);border:1px solid var(--line);border-radius:4px;padding:1px 5px;font-size:.88em}
+.modal ol{padding-left:20px;font-size:.84rem;color:var(--ink-soft);line-height:1.7;margin:0 0 14px}
+
+/* navigazione viste */
+.nav{display:flex;gap:2px;overflow-x:auto;padding:0 0 0;scrollbar-width:none}
+.nav::-webkit-scrollbar{display:none}
+.nav button{
+  border:0;background:transparent;padding:9px 2px;margin-right:20px;cursor:pointer;
+  font-size:.88rem;font-weight:600;color:var(--ink-faint);white-space:nowrap;
+  border-bottom:2px solid transparent;
+}
+.nav button[aria-current="page"]{color:var(--ink);border-bottom-color:var(--ink)}
+
+/* ---------- filtri ------------------------------------------------------- */
+.filters{padding:12px 0 4px}
+.filters-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px}
+.filters-head h2{font-size:.78rem;font-weight:700;color:var(--ink-soft);margin:0;letter-spacing:.02em}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{
+  border:1px solid var(--line);background:var(--surface);color:var(--ink-soft);
+  padding:5px 11px;border-radius:999px;font-size:.8rem;cursor:pointer;
+}
+.chip[aria-pressed="true"]{background:var(--ink);border-color:var(--ink);color:#fff}
+.chip.dim{opacity:.5}
+
+/* ---------- schede ------------------------------------------------------- */
+.card{
+  background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);
+  margin:14px 0;overflow:hidden;
+}
+.card-head{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;padding:14px 16px 0}
+.card-head h3{font-family:var(--serif);font-size:1.06rem;font-weight:600;margin:0}
+.card-head p{margin:0;font-size:.78rem;color:var(--ink-faint)}
+.card-body{padding:12px 16px 16px}
+.card-body.flush{padding:8px 0 0}
+
+.grid2{display:grid;grid-template-columns:1fr;gap:0}
+@media (min-width:840px){ .grid2{grid-template-columns:320px 8fr;gap:15px} }
+.grid2b{display:grid;grid-template-columns:1fr;gap:15px}
+@media (min-width:840px){ .grid2b{grid-template-columns:8fr 300px} }
+
+/* ---------- indicatori --------------------------------------------------- */
+.kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--line-soft)}
+.kpi{background:var(--surface);padding:10px 12px}
+.kpi .k{font-size:.72rem;color:var(--ink-faint);margin-bottom:2px}
+.kpi .v{font-size:1.24rem;font-weight:650;font-variant-numeric:tabular-nums;letter-spacing:-.02em}
+.kpi .s{font-size:.74rem;color:var(--ink-faint);font-variant-numeric:tabular-nums}
+.kpi .v.over{color:var(--over)}
+.kpi .v.under{color:var(--under)}
+
+/* Variante compatta: stessa larghezza (3 colonne uguali), altezza ridotta
+   di circa il 15% rispetto a .kpi standard. Usata per le due righe di KPI
+   in cima al Recap (actual/budget/scostamento + stipendio/spese/saving),
+   così restano identiche tra loro. */
+.kpis-compact .kpi{padding:10px 12px}
+.kpis-compact .kpi .k{font-size:.66rem;margin-bottom:1px}
+.kpis-compact .kpi .v{font-size:1.06rem}
+.kpis-compact .kpi .s{font-size:.68rem}
+
+/* ---------- tabelle ------------------------------------------------------ */
+.tablewrap{
+  overflow:auto;-webkit-overflow-scrolling:touch;
+  max-height:var(--panelh);
+  border:1px solid var(--line-soft);border-radius:var(--radius-sm);
+}
+table{border-collapse:collapse;width:100%;font-size:.86rem}
+th,td{padding:7px 10px;text-align:left;border-bottom:1px solid var(--line-soft);white-space:nowrap}
+thead th{
+  position:sticky;top:0;background:var(--surface);z-index:1;
+  font-size:.72rem;font-weight:700;color:var(--ink-soft);border-bottom:1px solid var(--line);
+}
+td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
+tbody tr:hover{background:var(--surface-2)}
+tbody tr.is-open{background:var(--surface-2)}
+tfoot td{font-weight:700;border-top:1px solid var(--line);border-bottom:0;background:var(--surface-2);font-variant-numeric:tabular-nums}
+td.cat{font-weight:600;white-space:normal;min-width:130px}
+td.note{white-space:normal;min-width:150px;max-width:340px}
+.sub{color:var(--ink-faint);font-size:.76rem;font-weight:400}
+
+/* barra di scostamento dentro la cella: il segnale visivo principale */
+.varcell{width:112px;min-width:112px;padding-right:14px}
+.varbar{position:relative;height:16px;background:var(--surface-2);border-radius:3px;overflow:hidden}
+.varbar i{position:absolute;top:0;bottom:0;display:block}
+.varbar i.pos{background:var(--over)}
+.varbar i.neg{background:var(--under)}
+.varbar::after{content:"";position:absolute;left:50%;top:0;bottom:0;width:1px;background:var(--line)}
+.varnum.over{color:var(--over)}
+.varnum.under{color:var(--under)}
+
+.rowbtn{
+  border:1px solid var(--line);background:var(--surface);border-radius:var(--radius-sm);
+  padding:3px 9px;font-size:.75rem;font-weight:600;cursor:pointer;color:var(--ink-soft);
+}
+.rowbtn:hover{background:var(--ink);border-color:var(--ink);color:#fff}
+.rowbtn[aria-expanded="true"]{background:var(--ink);border-color:var(--ink);color:#fff}
+
+/* elenco a barre (composizione budget) */
+.blist{
+  display:flex;flex-direction:column;
+  max-height:var(--panelh);overflow:auto;-webkit-overflow-scrolling:touch;
+  border:1px solid var(--line-soft);border-radius:var(--radius-sm);
+}
+.blist button{
+  display:grid;grid-template-columns:1fr auto;align-items:center;gap:10px;
+  border:0;border-bottom:1px solid var(--line-soft);background:transparent;
+  padding:8px 16px;text-align:left;cursor:pointer;position:relative;font-size:.86rem;
+}
+.blist button:hover{background:var(--surface-2)}
+.blist .fill{position:absolute;left:0;top:0;bottom:0;background:var(--surface-2);z-index:0}
+.blist .lab,.blist .val{position:relative;z-index:1}
+.blist .lab{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.blist .val{font-variant-numeric:tabular-nums;color:var(--ink-soft)}
+
+.legend{display:flex;gap:14px;flex-wrap:wrap;padding:0 16px 6px;font-size:.78rem;color:var(--ink-soft)}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.legend i{width:10px;height:10px;border-radius:2px;display:inline-block}
+
+/* ---------- grafici ------------------------------------------------------ */
+.chart{padding:4px 6px 0;height:var(--panelh);box-sizing:border-box;display:flex;align-items:center}
+.chart svg{width:100%;height:100%;display:block}
+.chart-donut{height:320px}
+.chart-half{height:calc(var(--panelh) / 2);min-height:220px}
+.chart text{font-family:var(--sans)}
+.chart .axis{font-size:11px;fill:var(--ink-faint)}
+.chart .grid{stroke:var(--line-soft);stroke-width:1}
+.chart .zero{stroke:var(--line);stroke-width:1}
+.chart .hit{fill:transparent}
+.chart .bar{transition:opacity .12s}
+.chart .vlabel{font-size:11px;font-weight:700;fill:var(--ink-soft)}
+.chart .colgroup:hover .bar{opacity:.78}
+.chart .colgroup.is-sel .bar{stroke:var(--ink);stroke-width:1.5}
+.chart .colgroup.is-sel .vlabel{fill:var(--ink)}
+.chart .refline{stroke:var(--ink);stroke-width:1.5;stroke-dasharray:5 4}
+.chart .reflabel{font-size:11px;font-weight:700;fill:var(--ink)}
+.chart .slicelabel{font-size:11px;font-weight:700;fill:#fff}
+.chart .donutTop{font-size:20px;font-weight:700;fill:var(--ink)}
+.chart .donutBottom{font-size:11px;fill:var(--ink-faint)}
+.chart .slice{stroke:var(--surface);stroke-width:1.5}
+
+/* ---------- schermata di caricamento ------------------------------------- */
+.loader{max-width:560px;margin:8vh auto;text-align:center;padding:0 16px}
+.loader h2{font-family:var(--serif);font-size:1.55rem;margin:0 0 8px}
+.loader p{color:var(--ink-soft);margin:0 0 20px}
+.drop{
+  border:1.5px dashed var(--line);border-radius:var(--radius);background:var(--surface);
+  padding:30px 20px;transition:border-color .15s,background .15s;
+}
+.drop.hover{border-color:var(--jack);background:#F3F8F7}
+.drop small{display:block;margin-top:12px;color:var(--ink-faint);font-size:.78rem}
+.hint{margin-top:22px;font-size:.8rem;color:var(--ink-faint);text-align:left;line-height:1.6}
+.hint code{background:var(--surface);border:1px solid var(--line);border-radius:4px;padding:1px 5px;font-size:.92em}
+
+.msg{border-radius:var(--radius);padding:11px 14px;font-size:.85rem;margin:12px 0}
+.msg.err{background:#FCEEEB;border:1px solid #EBC7BE;color:#7C2D18}
+.msg.info{background:var(--surface);border:1px solid var(--line);color:var(--ink-soft)}
+
+.empty{padding:22px 16px;color:var(--ink-faint);font-size:.86rem}
+.hidden{display:none !important}
+.spin{display:inline-block;width:14px;height:14px;border:2px solid var(--line);border-top-color:var(--ink);border-radius:50%;animation:sp .7s linear infinite;vertical-align:-2px;margin-right:7px}
+@keyframes sp{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){*{animation:none !important;transition:none !important}}
+
+@media (max-width:600px){
+  :root{--panelh:420px}
+  .brand h1{font-size:1.2rem}
+  .card-body{padding:10px 12px 14px}
+  .card-head{padding:12px 12px 0}
+  th,td{padding:7px 8px}
+  .kpi{padding:10px 10px}
+  .kpi .v{font-size:1.05rem}
+  .varcell{width:74px;min-width:74px}
+}
+@media print{
+  .top,.filters,.rowbtn{display:none}
+  .card{break-inside:avoid;box-shadow:none}
+  body{background:#fff}
+}
+</style>
+</head>
+<body>
+<!-- ==========================================================================
+     MARKUP
+     ====================================================================== -->
+<header class="top" id="top">
+  <div class="wrap">
+    <div class="top-in">
+      <div class="brand">
+        <h1 id="title">Conti di casa</h1>
+        <span class="meta" id="meta"></span>
+      </div>
+      <label class="toggle" id="toggleRistr">
+        <input type="checkbox" id="chkRistr">
+        <span class="track"></span>
+        Ristrutt.
+      </label>
+      <div class="seg" role="group" aria-label="Chi">
+        <button type="button" data-p="tot" aria-pressed="true">Totale</button>
+        <button type="button" data-p="jack" aria-pressed="false">Jack</button>
+        <button type="button" data-p="otti" aria-pressed="false">Otti</button>
+      </div>
+      <button class="btn" id="btnReset" type="button" disabled>Azzera filtri</button>
+      <!-- L'autenticazione richiede sempre un gesto dell'utente: è una misura
+           richiesta da Google e impedisce popup/refresh token invisibili. -->
+      <button class="btn solid" id="btnLogin" type="button">Accedi con Google</button>
+      <button class="btn" id="btnReload" type="button" disabled>Aggiorna dati</button>
+      <button class="btn ghost" id="btnLogout" type="button" disabled>Esci</button>
+    </div>
+    <nav class="nav" id="nav" aria-label="Sezioni">
+      <button type="button" data-v="recap" aria-current="page">Recap</button>
+      <button type="button" data-v="cantiere">Ristrutturazione</button>
+      <button type="button" data-v="budget">Analisi budget</button>
+    </nav>
+  </div>
+</header>
+
+<main class="wrap" id="main">
+  <!-- La dashboard non carica dati finché l'utente non concede il token OAuth. -->
+  <section class="loader" id="loader">
+    <h2>Conti di casa</h2>
+    <p>Le tue spese e il tuo budget, protetti dall'accesso Google.</p>
+
+    <!-- FILE-LOCALE-DISATTIVATO-INIZIO
+    Il vecchio pulsante "Scegli il file Excel" e il drag&drop da file locale
+    sono disattivati (questo intero blocco è dentro un commento HTML). Per
+    riattivarli:
+      1) togli questa riga e la riga "FILE-LOCALE-DISATTIVATO-FINE" qui sotto
+         (cioè elimina l'apertura e la chiusura del commento HTML che
+         racchiude il blocco <div class="drop">...</div>);
+      2) più in basso in questa pagina, riattiva allo stesso modo
+         <input type="file" id="file" ...> (cerca "FILE-LOCALE-DISATTIVATO");
+      3) nello script della pagina, dentro App.init(), fai lo stesso con il
+         blocco di codice JS che comincia con lo stesso testo
+         "FILE-LOCALE-DISATTIVATO".
+    <div class="drop" id="drop">
+      <button class="btn solid" id="btnPick" type="button">Scegli il file Excel</button>
+      <small>oppure trascinalo qui — il file resta sul tuo computer</small>
+    </div>
+    FILE-LOCALE-DISATTIVATO-FINE -->
+
+    <div id="loadMsg"></div>
+    <div class="hint">
+      Servono i fogli <code>Spese 2026</code> e <code>Bdg26_long</code>;
+      <code>Stipendi J</code> e <code>Dash Otti 26</code> aggiungono la linea dello stipendio.<br>
+      I dati vengono letti dal Google Sheet privato solo dopo l'accesso con un
+      account autorizzato. Il token non viene memorizzato sul dispositivo.
+    </div>
+  </section>
+
+  <!-- filtri -->
+  <section class="filters hidden" id="filters">
+    <div class="filters-head">
+      <h2>Mesi</h2>
+      <button class="btn small" id="btnAllMonths" type="button">Tutti</button>
+    </div>
+    <div class="chips" id="monthChips"></div>
+  </section>
+
+  <div id="views"></div>
+</main>
+
+<!-- FILE-LOCALE-DISATTIVATO: input nascosto usato dal vecchio selettore di file
+     locale. Per riattivarlo, togli l'apertura/chiusura del commento HTML qui
+     sotto (vedi anche le istruzioni "FILE-LOCALE-DISATTIVATO" più in alto
+     nella pagina e dentro App.init() nello script).
+<input type="file" id="file" accept=".xlsx,.xlsm" style="position:absolute;left:-9999px" aria-hidden="true">
+-->
+<script>
+/* ============================================================================
+   UTILITÀ — formattazione numeri e piccole scorciatoie per il DOM
+   ========================================================================== */
+var Fmt = (function () {
+  'use strict';
+  var nf0, nf1, pf;
+  // useGrouping:'always' perché in italiano Intl non separa le migliaia sotto
+  // 10.000, mentre nelle dashboard i numeri sono sempre puntati.
+  try {
+    nf0 = new Intl.NumberFormat('it-IT', { maximumFractionDigits: 0, useGrouping: 'always' });
+    nf1 = new Intl.NumberFormat('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2, useGrouping: 'always' });
+    pf = new Intl.NumberFormat('it-IT', { style: 'percent', maximumFractionDigits: 1 });
+  } catch (e) {
+    nf0 = { format: function (v) { return String(Math.round(v)); } };
+    nf1 = { format: function (v) { return v.toFixed(2); } };
+    pf = { format: function (v) { return (v * 100).toFixed(1) + '%'; } };
+  }
+  function intero(v) {
+    var n = Math.round(v || 0);
+    return n === 0 ? 0 : n;   // evita "-0"
+  }
+  return {
+    n: function (v) { return nf0.format(intero(v)); },
+    n2: function (v) { return nf1.format(v || 0); },
+    eur: function (v) { return nf0.format(intero(v)) + ' €'; },
+    pct: function (v) { return v === null || v === undefined || !isFinite(v) ? '—' : pf.format(v); },
+    signed: function (v) {
+      var n = intero(v);
+      return (n > 0 ? '+' : '') + nf0.format(n);
+    },
+    data: function (d) {
+      if (!(d instanceof Date)) return '';
+      return String(d.getUTCDate()).padStart(2, '0') + '/' + String(d.getUTCMonth() + 1).padStart(2, '0');
+    }
+  };
+})();
+
+function h(tag, attrs, children) {
+  var n = document.createElement(tag);
+  if (attrs) for (var k in attrs) {
+    if (k === 'class') n.className = attrs[k];
+    else if (k === 'text') n.textContent = attrs[k];
+    else if (k.slice(0, 2) === 'on') n.addEventListener(k.slice(2), attrs[k]);
+    else if (attrs[k] !== null && attrs[k] !== undefined && attrs[k] !== false) n.setAttribute(k, attrs[k]);
+  }
+  (children || []).forEach(function (c) {
+    if (c === null || c === undefined || c === false) return;
+    n.appendChild(typeof c === 'string' ? document.createTextNode(c) : c);
+  });
+  return n;
+}
+function $(sel) { return document.querySelector(sel); }
+function clear(node) { while (node.firstChild) node.removeChild(node.firstChild); return node; }
+/* ============================================================================
+   XLSX READER — 100% offline
+   ----------------------------------------------------------------------------
+   Legge un .xlsx senza alcuna libreria esterna:
+     1. Scompatta lo ZIP (central directory + local headers)
+     2. Decomprime con DecompressionStream('deflate-raw') se disponibile,
+        altrimenti con l'inflate puro incluso qui sotto
+     3. Converte gli XML dei fogli in matrici di valori JS
+
+   Espone: XlsxReader.open(File|ArrayBuffer) -> Promise<Workbook>
+           workbook.sheetNames  -> string[]
+           workbook.rows(name)  -> Promise<any[][]>
+   ========================================================================== */
+var XlsxReader = (function () {
+  'use strict';
+
+  /* ---------- inflate puro (fallback, algoritmo tinf) --------------------- */
+  function Tree() { this.table = new Uint16Array(16); this.trans = new Uint16Array(288); }
+
+  var sltree = new Tree(), sdtree = new Tree();
+  var length_bits = new Uint8Array(30), length_base = new Uint16Array(30);
+  var dist_bits = new Uint8Array(30), dist_base = new Uint16Array(30);
+  var clcidx = new Uint8Array([16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15]);
+  var code_tree = new Tree();
+  var lengths = new Uint8Array(288 + 32);
+  var offs = new Uint16Array(16);
+
+  function buildBitsBase(bits, base, delta, first) {
+    var i, sum;
+    for (i = 0; i < delta; ++i) bits[i] = 0;
+    for (i = 0; i < 30 - delta; ++i) bits[i + delta] = (i / delta) | 0;
+    for (sum = first, i = 0; i < 30; ++i) { base[i] = sum; sum += 1 << bits[i]; }
+  }
+
+  function buildFixedTrees(lt, dt) {
+    var i;
+    for (i = 0; i < 7; ++i) lt.table[i] = 0;
+    lt.table[7] = 24; lt.table[8] = 152; lt.table[9] = 112;
+    for (i = 0; i < 24; ++i) lt.trans[i] = 256 + i;
+    for (i = 0; i < 144; ++i) lt.trans[24 + i] = i;
+    for (i = 0; i < 8; ++i) lt.trans[24 + 144 + i] = 280 + i;
+    for (i = 0; i < 112; ++i) lt.trans[24 + 144 + 8 + i] = 144 + i;
+    for (i = 0; i < 5; ++i) dt.table[i] = 0;
+    dt.table[5] = 32;
+    for (i = 0; i < 32; ++i) dt.trans[i] = i;
+  }
+
+  function buildTree(t, src, off, num) {
+    var i, sum;
+    for (i = 0; i < 16; ++i) t.table[i] = 0;
+    for (i = 0; i < num; ++i) t.table[src[off + i]]++;
+    t.table[0] = 0;
+    for (sum = 0, i = 0; i < 16; ++i) { offs[i] = sum; sum += t.table[i]; }
+    for (i = 0; i < num; ++i) if (src[off + i]) t.trans[offs[src[off + i]]++] = i;
+  }
+
+  function Inf(source) {
+    this.source = source; this.sourceIndex = 0;
+    this.tag = 0; this.bitcount = 0;
+    this.dest = new Uint8Array(1 << 16); this.destLen = 0;
+    this.ltree = new Tree(); this.dtree = new Tree();
+  }
+
+  Inf.prototype.grow = function (extra) {
+    if (this.destLen + extra <= this.dest.length) return;
+    var n = this.dest.length;
+    while (n < this.destLen + extra) n *= 2;
+    var nd = new Uint8Array(n);
+    nd.set(this.dest.subarray(0, this.destLen));
+    this.dest = nd;
+  };
+
+  function getBit(d) {
+    if (!d.bitcount--) { d.tag = d.source[d.sourceIndex++]; d.bitcount = 7; }
+    var bit = d.tag & 1; d.tag >>>= 1; return bit;
+  }
+
+  function readBits(d, num, base) {
+    if (!num) return base;
+    while (d.bitcount < 24) { d.tag = d.tag | (d.source[d.sourceIndex++] << d.bitcount); d.bitcount += 8; }
+    var val = d.tag & (0xffff >>> (16 - num));
+    d.tag >>>= num; d.bitcount -= num;
+    return val + base;
+  }
+
+  function decodeSymbol(d, t) {
+    while (d.bitcount < 24) { d.tag = d.tag | (d.source[d.sourceIndex++] << d.bitcount); d.bitcount += 8; }
+    var sum = 0, cur = 0, len = 0, tag = d.tag;
+    do {
+      cur = 2 * cur + (tag & 1); tag >>>= 1; ++len;
+      sum += t.table[len]; cur -= t.table[len];
+    } while (cur >= 0);
+    d.tag = tag; d.bitcount -= len;
+    return t.trans[sum + cur];
+  }
+
+  function decodeTrees(d, lt, dt) {
+    var hlit, hdist, hclen, i, num, length;
+    hlit = readBits(d, 5, 257);
+    hdist = readBits(d, 5, 1);
+    hclen = readBits(d, 4, 4);
+    for (i = 0; i < 19; ++i) lengths[i] = 0;
+    for (i = 0; i < hclen; ++i) lengths[clcidx[i]] = readBits(d, 3, 0);
+    buildTree(code_tree, lengths, 0, 19);
+    for (num = 0; num < hlit + hdist;) {
+      var sym = decodeSymbol(d, code_tree);
+      switch (sym) {
+        case 16:
+          var prev = lengths[num - 1];
+          for (length = readBits(d, 2, 3); length; --length) lengths[num++] = prev;
+          break;
+        case 17:
+          for (length = readBits(d, 3, 3); length; --length) lengths[num++] = 0;
+          break;
+        case 18:
+          for (length = readBits(d, 7, 11); length; --length) lengths[num++] = 0;
+          break;
+        default:
+          lengths[num++] = sym;
+          break;
+      }
+    }
+    buildTree(lt, lengths, 0, hlit);
+    buildTree(dt, lengths, hlit, hdist);
+  }
+
+  function inflateBlockData(d, lt, dt) {
+    while (1) {
+      var sym = decodeSymbol(d, lt);
+      if (sym === 256) return;
+      if (sym < 256) {
+        d.grow(1);
+        d.dest[d.destLen++] = sym;
+      } else {
+        sym -= 257;
+        var length = readBits(d, length_bits[sym], length_base[sym]);
+        var dist = decodeSymbol(d, dt);
+        var offset = d.destLen - readBits(d, dist_bits[dist], dist_base[dist]);
+        d.grow(length);
+        for (var i = offset; i < offset + length; ++i) d.dest[d.destLen++] = d.dest[i];
+      }
+    }
+  }
+
+  function inflateUncompressedBlock(d) {
+    while (d.bitcount > 8) { d.sourceIndex--; d.bitcount -= 8; }
+    var length = d.source[d.sourceIndex + 1];
+    length = 256 * length + d.source[d.sourceIndex];
+    d.sourceIndex += 4;
+    d.grow(length);
+    for (var i = length; i; --i) d.dest[d.destLen++] = d.source[d.sourceIndex++];
+    d.bitcount = 0;
+  }
+
+  var treesReady = false;
+  function inflateRawJs(source) {
+    if (!treesReady) {
+      buildFixedTrees(sltree, sdtree);
+      buildBitsBase(length_bits, length_base, 4, 3);
+      buildBitsBase(dist_bits, dist_base, 2, 1);
+      length_bits[28] = 0; length_base[28] = 258;
+      treesReady = true;
+    }
+    var d = new Inf(source), bfinal, btype;
+    do {
+      bfinal = getBit(d);
+      btype = readBits(d, 2, 0);
+      if (btype === 0) inflateUncompressedBlock(d);
+      else if (btype === 1) inflateBlockData(d, sltree, sdtree);
+      else if (btype === 2) { decodeTrees(d, d.ltree, d.dtree); inflateBlockData(d, d.ltree, d.dtree); }
+      else throw new Error('Blocco deflate non valido');
+    } while (!bfinal);
+    return d.dest.subarray(0, d.destLen);
+  }
+
+  var hasNativeInflate = (typeof DecompressionStream === 'function');
+
+  function inflateRaw(bytes) {
+    if (!hasNativeInflate) return Promise.resolve(inflateRawJs(bytes));
+    try {
+      var ds = new DecompressionStream('deflate-raw');
+      var w = ds.writable.getWriter();
+      w.write(bytes); w.close();
+      return new Response(ds.readable).arrayBuffer()
+        .then(function (ab) { return new Uint8Array(ab); })
+        .catch(function () { return inflateRawJs(bytes); });
+    } catch (e) {
+      return Promise.resolve(inflateRawJs(bytes));
+    }
+  }
+
+  /* ---------- ZIP ---------------------------------------------------------- */
+  function readZip(buf) {
+    var dv = new DataView(buf), u8 = new Uint8Array(buf), i;
+    var eocd = -1;
+    for (i = u8.length - 22; i >= 0 && i > u8.length - 66000; i--) {
+      if (dv.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
+    }
+    if (eocd < 0) throw new Error('Non sembra un file .xlsx (ZIP non riconosciuto).');
+
+    var count = dv.getUint16(eocd + 10, true);
+    var cdOff = dv.getUint32(eocd + 16, true);
+
+    // ZIP64: i campi a 0xffffffff rimandano al record ZIP64
+    if (cdOff === 0xffffffff || count === 0xffff) {
+      for (i = eocd - 20; i >= 0; i--) {
+        if (dv.getUint32(i, true) === 0x07064b50) {
+          var z64 = Number(dv.getBigUint64(i + 8, true));
+          count = Number(dv.getBigUint64(z64 + 32, true));
+          cdOff = Number(dv.getBigUint64(z64 + 48, true));
+          break;
+        }
+      }
+    }
+
+    var entries = {}, p = cdOff;
+    for (i = 0; i < count; i++) {
+      if (dv.getUint32(p, true) !== 0x02014b50) break;
+      var method = dv.getUint16(p + 10, true);
+      var compSize = dv.getUint32(p + 20, true);
+      var nameLen = dv.getUint16(p + 28, true);
+      var extraLen = dv.getUint16(p + 30, true);
+      var cmtLen = dv.getUint16(p + 32, true);
+      var lho = dv.getUint32(p + 42, true);
+      var name = utf8(u8.subarray(p + 46, p + 46 + nameLen));
+      entries[name] = { method: method, compSize: compSize, lho: lho };
+      p += 46 + nameLen + extraLen + cmtLen;
+    }
+
+    function raw(name) {
+      var e = entries[name];
+      if (!e) return Promise.resolve(null);
+      var nl = dv.getUint16(e.lho + 26, true);
+      var el = dv.getUint16(e.lho + 28, true);
+      var start = e.lho + 30 + nl + el;
+      var slice = u8.subarray(start, start + e.compSize);
+      if (e.method === 0) return Promise.resolve(slice);
+      if (e.method !== 8) return Promise.reject(new Error('Compressione ZIP non supportata: ' + e.method));
+      return inflateRaw(slice);
+    }
+
+    return {
+      names: Object.keys(entries),
+      text: function (name) { return raw(name).then(function (b) { return b ? utf8(b) : null; }); }
+    };
+  }
+
+  var decoder = (typeof TextDecoder === 'function') ? new TextDecoder('utf-8') : null;
+  function utf8(bytes) {
+    if (decoder) return decoder.decode(bytes);
+    var s = '';
+    for (var i = 0; i < bytes.length; i += 8192) {
+      s += String.fromCharCode.apply(null, bytes.subarray(i, i + 8192));
+    }
+    return decodeURIComponent(escape(s));
+  }
+
+  /* ---------- XML helpers -------------------------------------------------- */
+  var ENT = { lt: '<', gt: '>', amp: '&', quot: '"', apos: "'" };
+  function unesc(s) {
+    if (s.indexOf('&') < 0) return s;
+    return s.replace(/&(#x?[0-9a-fA-F]+|\w+);/g, function (m, g) {
+      if (g.charAt(0) === '#') {
+        var code = g.charAt(1) === 'x' ? parseInt(g.slice(2), 16) : parseInt(g.slice(1), 10);
+        return String.fromCodePoint(code);
+      }
+      return ENT[g] !== undefined ? ENT[g] : m;
+    });
+  }
+
+  function attr(tag, name) {
+    var re = new RegExp('\\s' + name + '="([^"]*)"');
+    var m = re.exec(tag);
+    return m ? m[1] : null;
+  }
+
+  function colIndex(ref) {
+    var n = 0;
+    for (var i = 0; i < ref.length; i++) {
+      var c = ref.charCodeAt(i);
+      if (c < 65 || c > 90) break;
+      n = n * 26 + (c - 64);
+    }
+    return n - 1;
+  }
+
+  /* ---------- sharedStrings ------------------------------------------------ */
+  function parseSharedStrings(xml) {
+    var out = [];
+    if (!xml) return out;
+    var reSi = /<si>([\s\S]*?)<\/si>/g, m;
+    var reT = /<t[^>]*>([\s\S]*?)<\/t>/g;
+    while ((m = reSi.exec(xml))) {
+      var inner = m[1], s = '', mt;
+      reT.lastIndex = 0;
+      while ((mt = reT.exec(inner))) s += unesc(mt[1]);
+      out.push(s);
+    }
+    return out;
+  }
+
+  /* ---------- stili: quali formati sono date ------------------------------- */
+  var DATE_FMT_IDS = { 14: 1, 15: 1, 16: 1, 17: 1, 18: 1, 19: 1, 20: 1, 21: 1, 22: 1, 45: 1, 46: 1, 47: 1 };
+
+  function parseStyles(xml) {
+    var isDate = [];
+    if (!xml) return isDate;
+    var custom = {}, m;
+    var reFmt = /<numFmt[^>]*\/>/g;
+    while ((m = reFmt.exec(xml))) {
+      var id = +attr(m[0], 'numFmtId');
+      var code = unesc(attr(m[0], 'formatCode') || '');
+      var stripped = code.replace(/\[[^\]]*\]/g, '').replace(/"[^"]*"/g, '');
+      custom[id] = /[dmyhs]/i.test(stripped) && !/^(General|@|0|#)/.test(stripped.trim());
+    }
+    var mx = /<cellXfs[^>]*>([\s\S]*?)<\/cellXfs>/.exec(xml);
+    if (!mx) return isDate;
+    var reXf = /<xf[^>]*/g, mm;
+    while ((mm = reXf.exec(mx[1]))) {
+      var nid = +attr(mm[0] + ' ', 'numFmtId');
+      isDate.push(!!(DATE_FMT_IDS[nid] || custom[nid]));
+    }
+    return isDate;
+  }
+
+  var EPOCH = Date.UTC(1899, 11, 30);
+  function serialToDate(n) { return new Date(EPOCH + Math.round(n * 86400000)); }
+
+  /* ---------- foglio -> matrice -------------------------------------------- */
+  function parseSheet(xml, shared, isDateStyle) {
+    var rows = [];
+    // I tag auto-chiudenti (<row .../>, <c .../>) vanno gestiti a parte,
+    // altrimenti una regex avida "mangia" le celle successive.
+    var reRow = /<row\b([^>]*?)(\/?)>/g;
+    var reCell = /<c\b([^>]*?)(\/?)>/g;
+    var reV = /<v>([\s\S]*?)<\/v>/;
+    var reIs = /<t[^>]*>([\s\S]*?)<\/t>/g;
+    var mr;
+    while ((mr = reRow.exec(xml))) {
+      var body = '';
+      if (mr[2] !== '/') {
+        var rEnd = xml.indexOf('</row>', reRow.lastIndex);
+        if (rEnd < 0) rEnd = xml.length;
+        body = xml.slice(reRow.lastIndex, rEnd);
+        reRow.lastIndex = rEnd + 6;
+      }
+      if (!body) { rows.push([]); continue; }
+      var row = [], mc;
+      reCell.lastIndex = 0;
+      while ((mc = reCell.exec(body))) {
+        var tag = mc[1] + ' ', inner = '';
+        if (mc[2] !== '/') {
+          var cEnd = body.indexOf('</c>', reCell.lastIndex);
+          if (cEnd < 0) cEnd = body.length;
+          inner = body.slice(reCell.lastIndex, cEnd);
+          reCell.lastIndex = cEnd + 4;
+        }
+        var ref = attr(tag, 'r');
+        var ci = ref ? colIndex(ref) : row.length;
+        var t = attr(tag, 't');
+        var s = attr(tag, 's');
+        var val = null, mv;
+
+        if (t === 'inlineStr') {
+          val = ''; reIs.lastIndex = 0;
+          var mi;
+          while ((mi = reIs.exec(inner))) val += unesc(mi[1]);
+        } else {
+          mv = reV.exec(inner);
+          if (mv) {
+            var raw = unesc(mv[1]);
+            if (t === 's') val = shared[+raw];
+            else if (t === 'str') val = raw;
+            else if (t === 'b') val = raw === '1';
+            else if (t === 'e') val = null;
+            else {
+              var num = parseFloat(raw);
+              if (isNaN(num)) val = raw;
+              else if (s !== null && isDateStyle[+s] && num > 0) val = serialToDate(num);
+              else val = num;
+            }
+          }
+        }
+        while (row.length < ci) row.push(null);
+        row[ci] = (val === undefined ? null : val);
+      }
+      rows.push(row);
+    }
+    return rows;
+  }
+
+  /* ---------- API ---------------------------------------------------------- */
+  function toArrayBuffer(input) {
+    if (input instanceof ArrayBuffer) return Promise.resolve(input);
+    if (typeof input.arrayBuffer === 'function') return input.arrayBuffer();
+    return new Promise(function (res, rej) {
+      var fr = new FileReader();
+      fr.onload = function () { res(fr.result); };
+      fr.onerror = function () { rej(new Error('Lettura del file non riuscita.')); };
+      fr.readAsArrayBuffer(input);
+    });
+  }
+
+  function open(input) {
+    return toArrayBuffer(input).then(function (buf) {
+      var zip = readZip(buf);
+      return Promise.all([
+        zip.text('xl/workbook.xml'),
+        zip.text('xl/_rels/workbook.xml.rels'),
+        zip.text('xl/sharedStrings.xml'),
+        zip.text('xl/styles.xml')
+      ]).then(function (parts) {
+        var wbXml = parts[0], relsXml = parts[1];
+        if (!wbXml) throw new Error('Il file non contiene xl/workbook.xml: non è un .xlsx valido.');
+        var shared = parseSharedStrings(parts[2]);
+        var isDateStyle = parseStyles(parts[3]);
+
+        var rels = {}, m;
+        var reRel = /<Relationship[^>]*\/>/g;
+        while ((m = reRel.exec(relsXml || ''))) {
+          rels[attr(m[0], 'Id')] = attr(m[0], 'Target');
+        }
+
+        var sheets = {}, order = [];
+        var reSheet = /<sheet[^>]*\/>/g;
+        while ((m = reSheet.exec(wbXml))) {
+          var nm = unesc(attr(m[0], 'name') || '');
+          var rid = attr(m[0], 'r:id') || attr(m[0], 'id');
+          var target = rels[rid] || '';
+          if (target.charAt(0) !== '/') target = 'xl/' + target.replace(/^\.\//, '');
+          else target = target.slice(1);
+          sheets[nm] = target;
+          order.push(nm);
+        }
+
+        var cache = {};
+        return {
+          sheetNames: order,
+          has: function (name) { return !!sheets[name]; },
+          rows: function (name) {
+            if (cache[name]) return cache[name];
+            var path = sheets[name];
+            if (!path) return Promise.reject(new Error('Foglio non trovato: "' + name + '"'));
+            cache[name] = zip.text(path).then(function (xml) {
+              return parseSheet(xml || '', shared, isDateStyle);
+            });
+            return cache[name];
+          }
+        };
+      });
+    });
+  }
+
+  return { open: open, _inflateRawJs: inflateRawJs };
+})();
+/* ============================================================================
+   CONFIGURAZIONE
+   ----------------------------------------------------------------------------
+   Tutto ciò che dipende dal tuo file Excel sta qui. Se cambi nome ai fogli o
+   alle colonne, o se cambia la quota di ripartizione, si modifica solo questo
+   blocco: il resto del codice non va toccato.
+   ========================================================================== */
+var CONFIG = {
+  anno: 2026,
+
+  // Ripartizione di default delle spese familiari (col. O del foglio spese
+  // può sovrascriverla riga per riga).
+  quotaJack: 0.60,
+
+  persone: { jack: 'Jack', otti: 'Otti' },
+
+  fogli: {
+    spese: 'Spese 2026',
+    budget: 'Bdg26_long',
+    stipendiJack: 'Stipendi J',
+    stipendiOtti: 'Dash Otti 26'
+  },
+
+  // I nomi delle colonne vengono cercati nell'intestazione: l'ordine delle
+  // colonne nel foglio può cambiare senza rompere nulla.
+  colonne: {
+    spese: {
+      data: 'Data',
+      chi: 'Who spends',
+      categoria: 'Spesa',
+      importo: 'Importo',
+      familiare: 'Spesa familiare',
+      note: 'Note',
+      noteExtra: 'Note aggiuntive',
+      mese: 'Mese',
+      jack: 'Spesa Jack',
+      otti: 'Spesa Otti',
+      quotaJack: 'Quota Jack se non 60/40'
+    },
+    budget: {
+      categoria: 'Spesa',
+      tipo: 'Tipo spesa',
+      chi: 'Who spends',
+      meseNome: 'Mese_nome',
+      budget: 'Budget',
+      mese: 'Mese'
+    },
+    stipendiJack: { mese: 'Mese', anno: 'Anno', netto: 'Netto busta' },
+    stipendiOtti: { stipendio: 'Stipendio' }
+  },
+
+  // Categoria trattata come cantiere: esclusa dal recap e dal budget,
+  // ha una pagina dedicata.
+  categoriaCantiere: 'Ristrutturazione Marty'
+};
+
+var MESI = ['gennaio', 'febbraio', 'marzo', 'aprile', 'maggio', 'giugno',
+  'luglio', 'agosto', 'settembre', 'ottobre', 'novembre', 'dicembre'];
+var MESI_BREVI = ['gen', 'feb', 'mar', 'apr', 'mag', 'giu',
+  'lug', 'ago', 'set', 'ott', 'nov', 'dic'];
+
+/* ============================================================================
+   MODELLO DATI
+   ----------------------------------------------------------------------------
+   Model.fromWorkbook() trasforma i fogli grezzi in strutture pulite.
+   Tutte le funzioni di aggregazione sono pure: prendono il modello e un
+   filtro, restituiscono dati. Nessuna dipendenza dal DOM.
+   ========================================================================== */
+var Model = (function () {
+  'use strict';
+
+  function norm(s) {
+    return String(s == null ? '' : s).toLowerCase().replace(/[\s_]+/g, ' ').trim();
+  }
+
+  // Trova la riga di intestazione e mappa "nome colonna" -> indice.
+  // Prima passata: corrispondenza esatta. Seconda: per prefisso, così
+  // "Note (es: Conad...)" trova "Note" senza che "Mese_nome" rubi "Mese".
+  function headerMap(rows, attese) {
+    var wanted = attese.map(norm);
+    for (var r = 0; r < Math.min(rows.length, 30); r++) {
+      var row = rows[r] || [], c, i, h;
+      var found = 0, map = {}, usata = {};
+
+      for (c = 0; c < row.length; c++) {
+        h = norm(row[c]);
+        if (!h) continue;
+        for (i = 0; i < wanted.length; i++) {
+          if (map[attese[i]] === undefined && h === wanted[i]) {
+            map[attese[i]] = c; usata[c] = true; found++; break;
+          }
+        }
+      }
+      for (c = 0; c < row.length; c++) {
+        if (usata[c]) continue;
+        h = norm(row[c]);
+        if (!h) continue;
+        for (i = 0; i < wanted.length; i++) {
+          if (map[attese[i]] === undefined && h.indexOf(wanted[i]) === 0) {
+            map[attese[i]] = c; usata[c] = true; found++; break;
+          }
+        }
+      }
+      if (found >= Math.ceil(wanted.length * 0.6)) return { row: r, map: map };
+    }
+    return null;
+  }
+
+  function num(v) {
+    if (v == null || v === '') return 0;
+    if (typeof v === 'number') return isFinite(v) ? v : 0;
+    var n = parseFloat(String(v).replace(/\./g, '').replace(',', '.'));
+    return isNaN(n) ? 0 : n;
+  }
+
+  function txt(v) {
+    if (v == null) return '';
+    if (v instanceof Date) return v.toISOString().slice(0, 10);
+    return String(v).trim();
+  }
+
+  // Unifica le varianti di maiuscolo/minuscolo della stessa categoria
+  // ("farmacia" / "Farmacia") tenendo la grafia più usata.
+  function canonicalizer(values) {
+    var groups = {};
+    values.forEach(function (v) {
+      if (!v) return;
+      var k = v.toLowerCase();
+      (groups[k] = groups[k] || {})[v] = (groups[k][v] || 0) + 1;
+    });
+    var canon = {};
+    Object.keys(groups).forEach(function (k) {
+      var best = null, bestN = -1;
+      Object.keys(groups[k]).forEach(function (v) {
+        if (groups[k][v] > bestN) { bestN = groups[k][v]; best = v; }
+      });
+      canon[k] = best;
+    });
+    return function (v) { return v ? (canon[v.toLowerCase()] || v) : v; };
+  }
+
+  /* ---------- foglio spese ------------------------------------------------- */
+  function parseSpese(rows) {
+    var C = CONFIG.colonne.spese;
+    var keys = Object.keys(C);
+    var hm = headerMap(rows, keys.map(function (k) { return C[k]; }));
+    if (!hm) throw new Error('Intestazioni non riconosciute nel foglio "' + CONFIG.fogli.spese + '".');
+    var idx = {};
+    keys.forEach(function (k) { idx[k] = hm.map[C[k]]; });
+    if (idx.categoria === undefined || idx.importo === undefined) {
+      throw new Error('Nel foglio "' + CONFIG.fogli.spese + '" mancano le colonne Spesa e/o Importo.');
+    }
+
+    var raw = [];
+    for (var r = hm.row + 1; r < rows.length; r++) {
+      var row = rows[r] || [];
+      var cat = txt(row[idx.categoria]);
+      if (!cat) continue;
+      var importo = num(row[idx.importo]);
+      var mese = Math.round(num(row[idx.mese]));
+      if (!(mese >= 1 && mese <= 12)) {
+        var d = row[idx.data];
+        mese = (d instanceof Date) ? d.getUTCMonth() + 1 : 0;
+      }
+      if (!mese) continue;
+
+      var jack = idx.jack !== undefined ? num(row[idx.jack]) : null;
+      var otti = idx.otti !== undefined ? num(row[idx.otti]) : null;
+      var familiare = txt(row[idx.familiare]).toUpperCase() === 'YES';
+      var chi = txt(row[idx.chi]);
+
+      // Se il foglio non ha già le quote calcolate, le ricostruiamo qui con
+      // la stessa regola: familiare -> 60/40 (o quota indicata), altrimenti
+      // tutto a carico di chi ha speso.
+      if (jack === null || otti === null || (jack === 0 && otti === 0 && importo !== 0)) {
+        var q = idx.quotaJack !== undefined && row[idx.quotaJack] != null && row[idx.quotaJack] !== ''
+          ? num(row[idx.quotaJack]) : null;
+        if (q !== null && q > 1) q = q / 100;
+        if (familiare) {
+          var qj = (q === null ? CONFIG.quotaJack : q);
+          jack = importo * qj; otti = importo * (1 - qj);
+        } else if (chi === CONFIG.persone.otti) { jack = 0; otti = importo; }
+        else { jack = importo; otti = 0; }
+      }
+
+      raw.push({
+        mese: mese,
+        data: row[idx.data] instanceof Date ? row[idx.data] : null,
+        categoria: cat,
+        note: txt(row[idx.note]) || '—',
+        noteExtra: txt(row[idx.noteExtra]),
+        chi: chi,
+        familiare: familiare,
+        importo: importo,
+        jack: jack,
+        otti: otti
+      });
+    }
+
+    var canon = canonicalizer(raw.map(function (s) { return s.categoria; }));
+    raw.forEach(function (s) {
+      s.categoria = canon(s.categoria);
+      s.cantiere = (s.categoria.toLowerCase() === CONFIG.categoriaCantiere.toLowerCase());
+    });
+    return raw;
+  }
+
+  /* ---------- foglio budget (formato long) --------------------------------- */
+  function parseBudget(rows) {
+    var C = CONFIG.colonne.budget;
+    var keys = Object.keys(C);
+    var hm = headerMap(rows, keys.map(function (k) { return C[k]; }));
+    if (!hm) throw new Error('Intestazioni non riconosciute nel foglio "' + CONFIG.fogli.budget + '".');
+    var idx = {};
+    keys.forEach(function (k) { idx[k] = hm.map[C[k]]; });
+
+    var out = [];
+    for (var r = hm.row + 1; r < rows.length; r++) {
+      var row = rows[r] || [];
+      var cat = txt(row[idx.categoria]);
+      if (!cat) continue;
+      var mese = Math.round(num(row[idx.mese]));
+      if (!(mese >= 1 && mese <= 12)) {
+        var mn = txt(row[idx.meseNome]).toLowerCase();
+        mese = MESI.indexOf(mn) + 1;
+      }
+      if (!mese) continue;
+
+      var b = num(row[idx.budget]);
+      var chi = txt(row[idx.chi]);
+      var jack, otti;
+      if (chi === CONFIG.persone.jack || chi === 'J') { jack = b; otti = 0; }
+      else if (chi === CONFIG.persone.otti || chi === 'O') { jack = 0; otti = b; }
+      else { jack = b * CONFIG.quotaJack; otti = b * (1 - CONFIG.quotaJack); }
+
+      out.push({
+        categoria: cat, tipo: txt(row[idx.tipo]) || 'Familiare',
+        chi: chi, mese: mese, importo: b, jack: jack, otti: otti
+      });
+    }
+
+    var canon = canonicalizer(out.map(function (b) { return b.categoria; }));
+    out.forEach(function (b) {
+      b.categoria = canon(b.categoria);
+      b.cantiere = (b.categoria.toLowerCase() === CONFIG.categoriaCantiere.toLowerCase());
+    });
+    return out;
+  }
+
+  /* ---------- stipendi ----------------------------------------------------- */
+  function parseStipendiJack(rows) {
+    var C = CONFIG.colonne.stipendiJack;
+    var hm = headerMap(rows, [C.mese, C.anno, C.netto]);
+    var out = new Array(12).fill(0);
+    if (!hm) return out;
+    var iM = hm.map[C.mese], iA = hm.map[C.anno], iN = hm.map[C.netto];
+    for (var r = hm.row + 1; r < rows.length; r++) {
+      var row = rows[r] || [];
+      if (Math.round(num(row[iA])) !== CONFIG.anno) continue;
+      var label = txt(row[iM]).toLowerCase();
+      var m = MESI_BREVI.indexOf(label.slice(0, 3)) + 1;
+      if (!m) {
+        var d = row[iM];
+        m = (d instanceof Date) ? d.getUTCMonth() + 1 : 0;
+      }
+      if (m) out[m - 1] += num(row[iN]);
+    }
+    return out;
+  }
+
+  // Il foglio di Otti è una dashboard, non una tabella: l'anno fa da marcatore
+  // in prima colonna e le 12 righe successive sono i mesi.
+  function parseStipendiOtti(rows) {
+    var out = new Array(12).fill(0);
+    var col = -1, headerRow = -1;
+    for (var r = 0; r < rows.length && headerRow < 0; r++) {
+      var row = rows[r] || [];
+      for (var c = 0; c < row.length; c++) {
+        if (norm(row[c]) === norm(CONFIG.colonne.stipendiOtti.stipendio)) { col = c; headerRow = r; break; }
+      }
+    }
+    if (col < 0) return out;
+
+    var start = -1;
+    for (var i = 0; i < rows.length; i++) {
+      var v = (rows[i] || [])[0];
+      if (Math.round(num(v)) === CONFIG.anno && txt(v) !== '') { start = i + 1; break; }
+    }
+    if (start < 0) return out;
+    for (var k = 0; k < 12 && start + k < rows.length; k++) {
+      out[k] = num((rows[start + k] || [])[col]);
+    }
+    return out;
+  }
+
+  /* ---------- costruzione modello ------------------------------------------ */
+  function fromWorkbook(wb) {
+    var f = CONFIG.fogli;
+    var missing = [f.spese, f.budget].filter(function (n) { return !wb.has(n); });
+    if (missing.length) {
+      throw new Error('Fogli mancanti nel file: ' + missing.join(', ') +
+        '. Controlla di aver caricato il file giusto.');
+    }
+    var jobs = [wb.rows(f.spese), wb.rows(f.budget)];
+    jobs.push(wb.has(f.stipendiJack) ? wb.rows(f.stipendiJack) : Promise.resolve([]));
+    jobs.push(wb.has(f.stipendiOtti) ? wb.rows(f.stipendiOtti) : Promise.resolve([]));
+
+    return Promise.all(jobs).then(function (res) {
+      var spese = parseSpese(res[0]);
+      var budget = parseBudget(res[1]);
+      var sj = parseStipendiJack(res[2]);
+      var so = parseStipendiOtti(res[3]);
+      var mesiConDati = {};
+      spese.forEach(function (s) { if (!s.cantiere) mesiConDati[s.mese] = true; });
+
+      return {
+        anno: CONFIG.anno,
+        spese: spese,
+        budget: budget,
+        stipendi: { jack: sj, otti: so, tot: sj.map(function (v, i) { return v + so[i]; }) },
+        mesiConDati: Object.keys(mesiConDati).map(Number).sort(function (a, b) { return a - b; }),
+        caricatoIl: new Date()
+      };
+    });
+  }
+
+  /* ---------- aggregazioni -------------------------------------------------- */
+  var FIELD = { tot: 'importo', jack: 'jack', otti: 'otti' };
+
+  function inFilter(riga, filtro) {
+    return filtro.mesi.length === 0 || filtro.mesi.indexOf(riga.mese) >= 0;
+  }
+
+  function val(riga, persona) { return riga[FIELD[persona]]; }
+
+  // Tabella di varianza: una riga per categoria, actual vs budget.
+  function varianceTable(model, filtro) {
+    var acc = {};
+    function slot(cat) {
+      return acc[cat] || (acc[cat] = { categoria: cat, act: 0, bdg: 0, nOp: 0 });
+    }
+    model.spese.forEach(function (s) {
+      if (s.cantiere && !filtro.cantiere) return;
+      if (!inFilter(s, filtro)) return;
+      var r = slot(s.categoria); r.act += val(s, filtro.persona); r.nOp++;
+    });
+    model.budget.forEach(function (b) {
+      if (b.cantiere && !filtro.cantiere) return;
+      if (!inFilter(b, filtro)) return;
+      slot(b.categoria).bdg += val(b, filtro.persona);
+    });
+
+    return Object.keys(acc).map(function (k) {
+      var r = acc[k];
+      r.scarto = r.act - r.bdg;
+      r.scartoPct = r.bdg !== 0 ? r.scarto / Math.abs(r.bdg) : null;
+      return r;
+    }).sort(function (a, b) { return b.act - a.act; });
+  }
+
+  function totals(rows) {
+    return rows.reduce(function (t, r) {
+      t.act += r.act; t.bdg += r.bdg; return t;
+    }, { act: 0, bdg: 0 });
+  }
+
+  // Serie mensile delle spese, divisa Jack / Otti (per le colonne impilate).
+  function monthlySpese(model, filtro) {
+    var out = [];
+    for (var m = 1; m <= 12; m++) out.push({ mese: m, jack: 0, otti: 0, tot: 0 });
+    model.spese.forEach(function (s) {
+      if (s.cantiere && !filtro.cantiere) return;
+      if (filtro.categoria && s.categoria !== filtro.categoria) return;
+      var r = out[s.mese - 1];
+      r.jack += s.jack; r.otti += s.otti; r.tot += s.importo;
+    });
+    return out;
+  }
+
+  // Dettaglio di una categoria, raggruppato per Note.
+  function detailByNote(model, categoria, filtro) {
+    var acc = {};
+    model.spese.forEach(function (s) {
+      if (s.categoria !== categoria) return;
+      if (!inFilter(s, filtro)) return;
+      var k = s.note || '—';
+      var r = acc[k] || (acc[k] = { note: k, importo: 0, jack: 0, otti: 0, n: 0, mesi: {} });
+      r.importo += s.importo; r.jack += s.jack; r.otti += s.otti; r.n++;
+      r.mesi[s.mese] = true;
+    });
+    return Object.keys(acc).map(function (k) {
+      var r = acc[k];
+      r.mesiLista = Object.keys(r.mesi).map(Number).sort(function (a, b) { return a - b; });
+      return r;
+    }).sort(function (a, b) { return b.importo - a.importo; });
+  }
+
+  // Movimenti singoli (usati dal drill-through fino alla riga).
+  function movimenti(model, categoria, note, filtro) {
+    return model.spese.filter(function (s) {
+      if (categoria && s.categoria !== categoria) return false;
+      if (note && s.note !== note) return false;
+      return inFilter(s, filtro);
+    }).sort(function (a, b) {
+      if (a.mese !== b.mese) return a.mese - b.mese;
+      return b.importo - a.importo;
+    });
+  }
+
+  function cantiere(model) {
+    return model.spese.filter(function (s) { return s.cantiere; });
+  }
+
+  function budgetByCategoria(model, filtro) {
+    var acc = {};
+    model.budget.forEach(function (b) {
+      if (b.cantiere) return;
+      if (!inFilter(b, filtro)) return;
+      var v = val(b, filtro.persona);
+      var r = acc[b.categoria] || (acc[b.categoria] = { categoria: b.categoria, importo: 0, tipo: b.tipo });
+      r.importo += v;
+    });
+    return Object.keys(acc).map(function (k) { return acc[k]; })
+      .filter(function (r) { return Math.abs(r.importo) > 0.005; })
+      .sort(function (a, b) { return b.importo - a.importo; });
+  }
+
+  function budgetByTipo(model, filtro) {
+    var acc = {};
+    model.budget.forEach(function (b) {
+      if (b.cantiere || !inFilter(b, filtro)) return;
+      acc[b.tipo] = (acc[b.tipo] || 0) + val(b, filtro.persona);
+    });
+    return Object.keys(acc).map(function (k) { return { tipo: k, importo: acc[k] }; })
+      .sort(function (a, b) { return b.importo - a.importo; });
+  }
+
+  function budgetByMese(model, filtro) {
+    var out = [];
+    for (var m = 1; m <= 12; m++) out.push({ mese: m, bdg: 0, act: 0 });
+    model.budget.forEach(function (b) {
+      if (b.cantiere) return;
+      out[b.mese - 1].bdg += val(b, filtro.persona);
+    });
+    model.spese.forEach(function (s) {
+      if (s.cantiere) return;
+      out[s.mese - 1].act += val(s, filtro.persona);
+    });
+    return out;
+  }
+
+  // Budget di spesa per mese, diviso Jack/Otti — serve al grafico
+  // stipendio/spese del Recap (lì non c'è un'unica persona selezionata,
+  // servono entrambe le quote per poterle impilare o scegliere).
+  function budgetByMeseSplit(model) {
+    var out = [];
+    for (var m = 1; m <= 12; m++) out.push({ mese: m, jack: 0, otti: 0 });
+    model.budget.forEach(function (b) {
+      if (b.cantiere) return;
+      var r = out[b.mese - 1];
+      r.jack += b.jack; r.otti += b.otti;
+    });
+    return out;
+  }
+
+  // Serie mensile stipendio/spese per il grafico del Recap: per ogni mese
+  // usa l'actual dove c'è già un dato registrato; altrimenti stima —
+  // la media dei mesi noti per lo stipendio, il budget di categoria per le
+  // spese. Così i mesi già chiusi mostrano il consuntivo, quelli futuri una
+  // proiezione, sulla stessa serie continua.
+  function monthlyIncomeVsSpese(model, inclCantiere) {
+    var actSpese = monthlySpese(model, { persona: 'tot', mesi: [], cantiere: !!inclCantiere, categoria: null });
+    var bdgSpese = budgetByMeseSplit(model);
+    var actMesi = {};
+    model.mesiConDati.forEach(function (m) { actMesi[m] = true; });
+
+    function media(arr) {
+      var vals = arr.filter(function (v) { return v > 0; });
+      return vals.length ? vals.reduce(function (a, b) { return a + b; }, 0) / vals.length : 0;
+    }
+    var mediaJack = media(model.stipendi.jack);
+    var mediaOtti = media(model.stipendi.otti);
+
+    var out = [];
+    for (var i = 0; i < 12; i++) {
+      var m = i + 1;
+      var speseAttuale = !!actMesi[m];
+      var sj = model.stipendi.jack[i], so = model.stipendi.otti[i];
+      var stipJackAttuale = sj > 0, stipOttiAttuale = so > 0;
+      out.push({
+        mese: m,
+        stipJack: stipJackAttuale ? sj : mediaJack,
+        stipOtti: stipOttiAttuale ? so : mediaOtti,
+        stipJackAttuale: stipJackAttuale,
+        stipOttiAttuale: stipOttiAttuale,
+        speseJack: speseAttuale ? actSpese[i].jack : bdgSpese[i].jack,
+        speseOtti: speseAttuale ? actSpese[i].otti : bdgSpese[i].otti,
+        speseAttuale: speseAttuale
+      });
+    }
+    return out;
+  }
+
+  // Stipendio totale per la persona e i mesi selezionati (usato dalla riga
+  // KPI stipendio/spese/saving del Recap). Con mesi=[] (nessun filtro) somma
+  // tutti e 12 i mesi, esattamente come fa "Speso" con le spese.
+  function stipendioTotale(model, persona, mesi) {
+    var arr = persona === 'jack' ? model.stipendi.jack
+      : persona === 'otti' ? model.stipendi.otti
+      : model.stipendi.tot;
+    if (!mesi || !mesi.length) {
+      return arr.reduce(function (a, b) { return a + b; }, 0);
+    }
+    return mesi.reduce(function (a, m) { return a + (arr[m - 1] || 0); }, 0);
+  }
+
+  return {
+    fromWorkbook: fromWorkbook,
+    varianceTable: varianceTable,
+    totals: totals,
+    monthlySpese: monthlySpese,
+    detailByNote: detailByNote,
+    movimenti: movimenti,
+    cantiere: cantiere,
+    budgetByCategoria: budgetByCategoria,
+    budgetByTipo: budgetByTipo,
+    budgetByMese: budgetByMese,
+    budgetByMeseSplit: budgetByMeseSplit,
+    monthlyIncomeVsSpese: monthlyIncomeVsSpese,
+    stipendioTotale: stipendioTotale,
+    _num: num
+  };
+})();
+/* ============================================================================
+   GRAFICI — SVG generato a mano, nessuna libreria esterna
+   ----------------------------------------------------------------------------
+   Tutti i grafici disegnano dentro un viewBox e si adattano alla larghezza del
+   contenitore, quindi funzionano bene anche su telefono. I colori arrivano
+   dalle variabili CSS del tema.
+   ========================================================================== */
+var Charts = (function () {
+  'use strict';
+
+  var NS = 'http://www.w3.org/2000/svg';
+
+  function el(name, attrs, parent) {
+    var n = document.createElementNS(NS, name);
+    if (attrs) for (var k in attrs) if (attrs[k] !== null && attrs[k] !== undefined) n.setAttribute(k, attrs[k]);
+    if (parent) parent.appendChild(n);
+    return n;
+  }
+
+  function svgRoot(host, w, h) {
+    clear(host);
+    var s = el('svg', {
+      viewBox: '0 0 ' + w + ' ' + h,
+      preserveAspectRatio: 'xMidYMid meet',
+      role: 'img'
+    }, host);
+    s.style.width = '100%';
+    s.style.height = '100%';
+    s.style.display = 'block';
+    return s;
+  }
+
+  var STEPS = [1, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10];
+  function niceMax(v) {
+    if (v <= 0) return 1;
+    var mag = Math.pow(10, Math.floor(Math.log(v) / Math.LN10));
+    var n = v / mag;
+    for (var i = 0; i < STEPS.length; i++) if (n <= STEPS[i] + 1e-9) return STEPS[i] * mag;
+    return 10 * mag;
+  }
+
+  function kfmt(v) {
+    var a = Math.abs(v);
+    if (a >= 1000) return (v / 1000).toFixed(a >= 10000 ? 0 : 1).replace('.', ',') + 'k';
+    if (a < 1) return '0';
+    return Math.round(v).toString();
+  }
+
+  // Sceglie un passo che dia etichette leggibili e che cada esattamente su
+  // zero, così la linea dello zero coincide sempre con una griglia.
+  function axis(minV, maxV) {
+    var top = niceMax(Math.max(maxV, 0) || 1);
+    var d = 4, cands = [4, 5, 3, 2];
+    for (var i = 0; i < cands.length; i++) {
+      var s = top / cands[i];
+      var r = s / Math.pow(10, Math.floor(Math.log(s) / Math.LN10));
+      if (Math.abs(r - Math.round(r * 2) / 2) < 1e-9) { d = cands[i]; break; }
+    }
+    var step = top / d;
+    // Il fondo segue il minimo reale (con un margine), così un piccolo saldo
+    // negativo non fa sprecare metà grafico; le tacche restano ancorate a zero.
+    var bot = minV < 0 ? minV * 1.12 : 0;
+    var ticks = [], t;
+    for (t = 0; t <= top + step * 0.001; t += step) ticks.push(t);
+    for (t = -step; t >= bot; t -= step) ticks.push(t);
+    return { top: top, bot: bot, ticks: ticks };
+  }
+
+  /* ------------------------------------------------------------------------
+     Colonne impilate per mese (Jack + Otti). Cliccando una colonna si filtra
+     quel mese; le etichette sono in migliaia di euro.
+     ---------------------------------------------------------------------- */
+  function stackedMonths(host, data, opts) {
+    opts = opts || {};
+    var W = 720, H = 400, padL = 46, padR = 12, padT = 26, padB = 34;
+    var plotW = W - padL - padR, plotH = H - padT - padB;
+    var s = svgRoot(host, W, H);
+
+    var maxV = 0, minV = 0;
+    data.forEach(function (d) {
+      var pos = Math.max(0, d.jack) + Math.max(0, d.otti);
+      var neg = Math.min(0, d.jack) + Math.min(0, d.otti);
+      if (pos > maxV) maxV = pos;
+      if (neg < minV) minV = neg;
+    });
+    var ax = axis(minV, maxV);
+    var top = ax.top, bot = ax.bot;
+    var range = top - bot || 1;
+    var y = function (v) { return padT + plotH - ((v - bot) / range) * plotH; };
+
+    ax.ticks.forEach(function (t) {
+      var yy = y(t);
+      el('line', { x1: padL, x2: W - padR, y1: yy, y2: yy, class: 'grid' }, s);
+      el('text', { x: padL - 8, y: yy + 4, class: 'axis', 'text-anchor': 'end' }, s).textContent = kfmt(t);
+    });
+
+    var slot = plotW / data.length;
+    var bw = Math.min(38, slot * 0.62);
+
+    data.forEach(function (d, i) {
+      var cx = padL + slot * i + slot / 2;
+      var g = el('g', { class: 'colgroup' + (opts.selected && opts.selected(d) ? ' is-sel' : '') }, s);
+
+      var stackPos = 0, stackNeg = 0;
+      [['jack', 'var(--jack)'], ['otti', 'var(--otti)']].forEach(function (pair) {
+        var v = d[pair[0]];
+        if (!v) return;
+        var y0, y1;
+        if (v > 0) { y0 = y(stackPos + v); y1 = y(stackPos); stackPos += v; }
+        else { y0 = y(stackNeg); y1 = y(stackNeg + v); stackNeg += v; }
+        el('rect', {
+          x: cx - bw / 2, y: Math.min(y0, y1), width: bw,
+          height: Math.max(1, Math.abs(y1 - y0)), fill: pair[1], class: 'bar'
+        }, g);
+      });
+
+      var totale = d.jack + d.otti;
+      if (Math.abs(totale) > range * 0.02) {
+        el('text', {
+          x: cx, y: (totale >= 0 ? y(stackPos) - 7 : y(stackNeg) + 15),
+          class: 'vlabel', 'text-anchor': 'middle'
+        }, g).textContent = kfmt(totale);
+      }
+
+      el('text', { x: cx, y: H - 12, class: 'axis', 'text-anchor': 'middle' }, g)
+        .textContent = opts.tick ? opts.tick(d, i) : d.mese;
+
+      // L'area cliccabile va disegnata per ultima (sopra alle barre): se no
+      // un clic sulla barra vera e propria non arriva a nessun ascoltatore,
+      // e funziona solo toccando i margini vuoti della colonna.
+      var hit = el('rect', {
+        x: cx - slot / 2, y: padT, width: slot, height: H - padT, class: 'hit'
+      }, g);
+      if (opts.onPick) {
+        hit.style.cursor = 'pointer';
+        hit.addEventListener('click', function () { opts.onPick(d); });
+      }
+      hit.appendChild(el('title', {})).textContent =
+        (opts.label ? opts.label(d) : d.mese) + ' · ' + Fmt.eur(d.jack + d.otti);
+    });
+
+    var zero = y(0);
+    el('line', { x1: padL, x2: W - padR, y1: zero, y2: zero, class: 'zero' }, s);
+    return s;
+  }
+
+  /* ------------------------------------------------------------------------
+     Stipendio / Spese / Savings-Overrun per mese (Recap).
+     Come nel grafico Looker di riferimento: la barra principale mostra le
+     spese; in cima si impila il risparmio (saving = stipendio − spese) in
+     colore attenuato. Quando le spese superano lo stipendio la parte extra
+     (overrun) scende sotto la linea dello zero in colore rosso.
+     Due barre affiancate per mese: stipendio a sinistra, spese+saving a dx.
+     Il tutto con separatori tratteggiati tra i mesi.
+     ---------------------------------------------------------------------- */
+  function monthlyIncomeExpense(host, data, opts) {
+    opts = opts || {};
+
+     // Misura il riquadro vero, così il grafico lo riempie tutto
+    // e i testi restano della loro dimensione reale (niente "zoom").
+
+    var W = host.clientWidth > 50 ? host.clientWidth - 12 : 720;
+    var H = host.clientHeight > 50 ? host.clientHeight - 4 : 400;
+    var padL = 50, padR = 12, padT = 26, padB = 34;
+    var plotW = W - padL - padR, plotH = H - padT - padB;
+    var s = svgRoot(host, W, H);
+    var persona = opts.persona || 'tot';
+
+    function stip(d) { return persona === 'jack' ? d.stipJack : persona === 'otti' ? d.stipOtti : d.stipJack + d.stipOtti; }
+    function spese(d) { return persona === 'jack' ? d.speseJack : persona === 'otti' ? d.speseOtti : d.speseJack + d.speseOtti; }
+    var mainColor = persona === 'jack' ? 'var(--jack)' : persona === 'otti' ? 'var(--otti)' : 'var(--tot)';
+    var savingColor = '#E8A838';
+    var overrunColor = 'var(--over)';
+
+    var maxV = 0, minV = 0;
+    data.forEach(function (d) {
+      var st = stip(d), sp = spese(d), saving = st - sp;
+      var top = Math.max(st, sp);
+      if (top > maxV) maxV = top;
+      if (saving < 0 && saving < minV) minV = saving;
+    });
+
+    var ax = axis(minV, maxV);
+    var top = ax.top, bot = ax.bot, range = top - bot || 1;
+    var y = function (v) { return padT + plotH - ((v - bot) / range) * plotH; };
+
+    ax.ticks.forEach(function (t) {
+      var yy = y(t);
+      el('line', { x1: padL, x2: W - padR, y1: yy, y2: yy, class: 'grid' }, s);
+      el('text', { x: padL - 8, y: yy + 4, class: 'axis', 'text-anchor': 'end' }, s).textContent = kfmt(t);
+    });
+
+    var slot = plotW / data.length;
+    var gap = slot * 0.18;   // spazio vuoto tra un mese e l'altro (18% della colonna)
+    var inner = 2;           // spazietto tra barra stipendio e barra spese (pixel)
+    var bw = (slot - gap - inner) / 2;
+    var numeri = bw >= 16;   // barre troppo strette (es. telefono) = niente numeri
+
+    data.forEach(function (d, i) {
+      var slotX = padL + slot * i;
+      var g = el('g', { class: 'colgroup' + (opts.selected && opts.selected(d) ? ' is-sel' : '') }, s);
+      var st = stip(d), sp = spese(d), saving = st - sp;
+
+      // separatore tratteggiato tra mesi
+      if (i > 0) el('line', { x1: slotX, x2: slotX, y1: padT, y2: H - padB, class: 'sep' }, s);
+
+      var xLeft = slotX + gap / 2;
+      var xRight = xLeft + bw + inner;
+
+      // Barra sinistra: stipendio pieno
+      var y0s = y(st), y1s = y(0);
+      el('rect', {
+        x: xLeft, y: Math.min(y0s, y1s), width: bw,
+        height: Math.max(1, Math.abs(y1s - y0s)), fill: mainColor, class: 'bar', opacity: '0.45'
+      }, g);
+      // etichetta stipendio
+      if (numeri && st > range * 0.02) {
+        el('text', { x: xLeft + bw / 2, y: y(st) - 6, class: 'toplabel', 'text-anchor': 'middle' }, g)
+          .textContent = kfmt(st);
+      }
+
+      // Barra destra: spese (fino a min(sp, st)), cioè la parte "coperta"
+      var covered = Math.min(sp, Math.max(st, 0));
+      if (covered > 0) {
+        el('rect', {
+          x: xRight, y: y(covered), width: bw,
+          height: Math.max(1, y(0) - y(covered)), fill: mainColor, class: 'bar'
+        }, g);
+      }
+
+      if (saving >= 0) {
+        // Saving: la porzione di stipendio non spesa, impilata sopra le spese
+        if (saving > 0) {
+          el('rect', {
+            x: xRight, y: y(st), width: bw,
+            height: Math.max(1, y(sp) - y(st)), fill: savingColor, class: 'bar bar-saving'
+          }, g);
+        }
+        // etichetta saving: dentro la parte gialla se c'è spazio,
+        // altrimenti sopra, una riga più in alto dell'etichetta stipendio
+        if (numeri && saving > range * 0.015) {
+          var hGialla = y(sp) - y(st);
+          var ySav = hGialla > 16 ? y(st) + hGialla / 2 + 4 : y(st) - 18;
+          el('text', { x: xRight + bw / 2, y: ySav, class: 'saving-label', 'text-anchor': 'middle' }, g)
+
+            .textContent = kfmt(saving);
+        }
+        // etichetta spese
+        if (numeri && y(0) - y(covered) > 16) {
+          el('text', { x: xRight + bw / 2, y: y(sp / 2) + 4, class: 'vlabel', 'text-anchor': 'middle' }, g)
+            .textContent = kfmt(sp);
+        }
+      } else {
+        // Overrun: le spese eccedono lo stipendio
+        // la parte oltre lo stipendio la coloro in rosso sotto zero
+        var overrun = -saving;
+        el('rect', {
+          x: xRight, y: y(0), width: bw,
+          height: Math.max(1, y(saving) - y(0)), fill: overrunColor, class: 'bar'
+        }, g);
+        // etichetta overrun
+        if (overrun > range * 0.015) {
+          el('text', { x: xRight + bw / 2, y: y(saving) + 14, class: 'overrun-label', 'text-anchor': 'middle' }, g)
+            .textContent = '-' + kfmt(overrun);
+        }
+        // etichetta spese al centro della barra coperta
+        if (numeri && y(0) - y(covered) > 16) {
+          el('text', { x: xRight + bw / 2, y: y(covered / 2) + 4, class: 'inlabel', 'text-anchor': 'middle' }, g)
+            .textContent = kfmt(sp);
+        }
+      }
+
+      el('text', { x: slotX + slot / 2, y: H - 12, class: 'axis', 'text-anchor': 'middle' }, g)
+        .textContent = opts.tick ? opts.tick(d, i) : d.mese;
+
+      // hit area sopra a tutto
+      var hit = el('rect', { x: slotX, y: padT, width: slot, height: H - padT, class: 'hit' }, g);
+      if (opts.onPick) {
+        hit.style.cursor = 'pointer';
+        hit.addEventListener('click', function () { opts.onPick(d); });
+      }
+      hit.appendChild(el('title', {})).textContent =
+        (opts.label ? opts.label(d) : d.mese) +
+        ' · Stipendio ' + Fmt.eur(st) +
+        ' · Spese ' + Fmt.eur(sp) +
+        ' · ' + (saving >= 0 ? 'Saving ' + Fmt.eur(saving) : 'Overrun ' + Fmt.eur(-saving));
+    });
+
+    el('line', { x1: padL, x2: W - padR, y1: y(0), y2: y(0), class: 'zero' }, s);
+    return s;
+  }
+
+  /* ------------------------------------------------------------------------
+     Colonne singole con eventuale linea di riferimento (es. lo stipendio).
+     ---------------------------------------------------------------------- */
+  function bars(host, data, opts) {
+    opts = opts || {};
+    var W = 720, H = 400, padL = 46, padR = 12, padT = 26, padB = 34;
+    var plotW = W - padL - padR, plotH = H - padT - padB;
+    var s = svgRoot(host, W, H);
+
+    var maxV = 0, minV = 0;
+    data.forEach(function (d) {
+      if (d.value > maxV) maxV = d.value;
+      if (d.value < minV) minV = d.value;
+    });
+    (opts.refLine || []).forEach(function (r) { if (r.value > maxV) maxV = r.value; });
+
+    var ax = axis(minV, maxV);
+    var top = ax.top, bot = ax.bot;
+    var range = top - bot || 1;
+    var y = function (v) { return padT + plotH - ((v - bot) / range) * plotH; };
+
+    ax.ticks.forEach(function (t) {
+      var yy = y(t);
+      el('line', { x1: padL, x2: W - padR, y1: yy, y2: yy, class: 'grid' }, s);
+      el('text', { x: padL - 8, y: yy + 4, class: 'axis', 'text-anchor': 'end' }, s).textContent = kfmt(t);
+    });
+
+    var slot = plotW / data.length;
+    var bw = Math.min(40, slot * 0.6);
+
+    data.forEach(function (d, i) {
+      var cx = padL + slot * i + slot / 2;
+      var g = el('g', { class: 'colgroup' + (opts.selected && opts.selected(d) ? ' is-sel' : '') }, s);
+
+      var y0 = y(d.value), y1 = y(0);
+      el('rect', {
+        x: cx - bw / 2, y: Math.min(y0, y1), width: bw,
+        height: Math.max(1, Math.abs(y1 - y0)),
+        fill: d.color || opts.color || 'var(--jack)', class: 'bar'
+      }, g);
+
+      if (Math.abs(d.value) > range * 0.02) {
+        el('text', {
+          x: cx, y: d.value >= 0 ? y0 - 7 : y0 + 15,
+          class: 'inlabel', 'text-anchor': 'middle'
+        }, g).textContent = kfmt(d.value);
+      }
+      el('text', { x: cx, y: H - 12, class: 'axis', 'text-anchor': 'middle' }, g)
+        .textContent = d.tick !== undefined ? d.tick : d.label;
+
+      var hit = el('rect', { x: cx - slot / 2, y: padT, width: slot, height: H - padT, class: 'hit' }, g);
+      if (opts.onPick) {
+        hit.style.cursor = 'pointer';
+        hit.addEventListener('click', function () { opts.onPick(d); });
+      }
+      hit.appendChild(el('title', {})).textContent = d.label + ' · ' + Fmt.eur(d.value);
+    });
+
+    el('line', { x1: padL, x2: W - padR, y1: y(0), y2: y(0), class: 'zero' }, s);
+
+    (opts.refLine || []).forEach(function (r) {
+      var yy = y(r.value);
+      el('line', { x1: padL, x2: W - padR, y1: yy, y2: yy, class: 'refline' }, s);
+      var t = el('text', { x: padL + 4, y: yy - 6, class: 'reflabel' }, s);
+      t.textContent = r.label;
+    });
+    return s;
+  }
+
+  /* ------------------------------------------------------------------------
+     Ciambella per la composizione del budget.
+     ---------------------------------------------------------------------- */
+  var PALETTE = ['#2C6E6A', '#9C4A6E', '#4B6B9A', '#B4772F', '#5E7A4A', '#8A5FA8',
+    '#3F8FA0', '#A85252', '#6E7B8B', '#7E9C3F', '#C08A2E', '#4A5A75'];
+
+  function donut(host, slices, opts) {
+    opts = opts || {};
+    var W = 300, H = 300, cx = 150, cy = 150, R = 112, r = 66;
+    var s = svgRoot(host, W, H);
+    var tot = slices.reduce(function (a, x) { return a + Math.max(0, x.value); }, 0);
+    if (tot <= 0) {
+      el('text', { x: cx, y: cy, class: 'axis', 'text-anchor': 'middle' }, s).textContent = 'Nessun dato';
+      return s;
+    }
+
+    // Etichette hover: al mouseover di uno spicchio, il centro mostra
+    // la categoria e l'importo dello spicchio selezionato.
+    var hoverTop = el('text', { x: cx, y: cy - 4, class: 'donutTop', 'text-anchor': 'middle' }, s);
+    hoverTop.textContent = opts.centerTop || '';
+    var hoverBot = el('text', { x: cx, y: cy + 18, class: 'donutBottom', 'text-anchor': 'middle' }, s);
+    hoverBot.textContent = opts.centerBottom || '';
+
+    var a0 = -Math.PI / 2;
+    slices.forEach(function (sl, i) {
+      var v = Math.max(0, sl.value);
+      if (!v) return;
+      var a1 = a0 + (v / tot) * Math.PI * 2;
+      var large = (a1 - a0) > Math.PI ? 1 : 0;
+      var p = [
+        'M', cx + R * Math.cos(a0), cy + R * Math.sin(a0),
+        'A', R, R, 0, large, 1, cx + R * Math.cos(a1), cy + R * Math.sin(a1),
+        'L', cx + r * Math.cos(a1), cy + r * Math.sin(a1),
+        'A', r, r, 0, large, 0, cx + r * Math.cos(a0), cy + r * Math.sin(a0),
+        'Z'
+      ].join(' ');
+      var path = el('path', { d: p, fill: sl.color || PALETTE[i % PALETTE.length], class: 'slice' }, s);
+      path.appendChild(el('title', {})).textContent =
+        sl.label + ' · ' + Fmt.eur(v) + ' · ' + Fmt.pct(v / tot);
+      if (opts.onPick) {
+        path.style.cursor = 'pointer';
+        path.addEventListener('click', function () { opts.onPick(sl); });
+      }
+      path.addEventListener('mouseenter', function () {
+        hoverTop.textContent = sl.label;
+        hoverBot.textContent = Fmt.eur(v) + ' · ' + Fmt.pct(v / tot);
+      });
+      path.addEventListener('mouseleave', function () {
+        hoverTop.textContent = opts.centerTop || '';
+        hoverBot.textContent = opts.centerBottom || '';
+      });
+      var mid = (a0 + a1) / 2, frac = v / tot;
+      if (frac > 0.05) {
+        el('text', {
+          x: cx + ((R + r) / 2) * Math.cos(mid),
+          y: cy + ((R + r) / 2) * Math.sin(mid) + 4,
+          class: 'slicelabel', 'text-anchor': 'middle',
+          'pointer-events': 'none'
+        }, s).textContent = Math.round(frac * 100) + '%';
+      }
+      a0 = a1;
+    });
+
+    return s;
+  }
+
+  return {
+    stackedMonths: stackedMonths, monthlyIncomeExpense: monthlyIncomeExpense,
+    bars: bars, donut: donut, palette: PALETTE, kfmt: kfmt
+  };
+})();
+/* ============================================================================
+   APP — stato, filtri, viste
+   ========================================================================== */
+var App = (function () {
+  'use strict';
+
+  var state = {
+    model: null,
+    view: 'recap',
+    persona: 'tot',     // 'tot' | 'jack' | 'otti'
+    mesi: [],           // vuoto = tutti i mesi
+    inclCantiere: false, // se true il cantiere è incluso nel recap/budget
+    categoria: null,    // categoria selezionata nel dettaglio
+    noteAperta: null,   // nota espansa fino ai singoli movimenti
+    nomeFile: ''
+  };
+
+  function filtro(extra) {
+    var f = {
+      persona: state.persona,
+      mesi: state.mesi,
+      categoria: state.categoria,
+      cantiere: state.inclCantiere
+    };
+    if (extra) for (var k in extra) f[k] = extra[k];
+    return f;
+  }
+
+  var COLORE = { tot: 'var(--tot)', jack: 'var(--jack)', otti: 'var(--otti)' };
+  var NOME = { tot: 'Totale', jack: 'Jack', otti: 'Otti' };
+
+  /* ---------- componenti riutilizzabili ------------------------------------ */
+  function card(titolo, sottotitolo, corpo, flush) {
+    var head = h('div', { class: 'card-head' }, [h('h3', { text: titolo })]);
+    if (sottotitolo) head.appendChild(h('p', { text: sottotitolo }));
+    return h('section', { class: 'card' }, [head, h('div', { class: 'card-body' + (flush ? ' flush' : '') }, [corpo])]);
+  }
+
+  function kpis(items, extraClass) {
+    return h('div', { class: 'kpis' + (extraClass ? ' ' + extraClass : '') }, items.map(function (it) {
+      return h('div', { class: 'kpi' }, [
+        h('div', { class: 'k', text: it.k }),
+        h('div', { class: 'v' + (it.tone ? ' ' + it.tone : ''), text: it.v }),
+        h('div', { class: 's', text: it.s || '' })
+      ]);
+    }));
+  }
+
+  function legend(items) {
+    return h('div', { class: 'legend' }, items.map(function (it) {
+      return h('span', {}, [h('i', { style: 'background:' + it.color }), document.createTextNode(it.label)]);
+    }));
+  }
+
+  function chartHost(extraClass) { return h('div', { class: extraClass ? 'chart ' + extraClass : 'chart' }); }
+
+  // Cella con barra divergente: a destra e in rosso se si è speso più del
+  // budget, a sinistra e in verde se si è speso meno.
+  function varCell(scarto, scala) {
+    var w = scala > 0 ? Math.min(50, Math.abs(scarto) / scala * 50) : 0;
+    var bar = h('div', { class: 'varbar' }, [
+      h('i', {
+        class: scarto >= 0 ? 'pos' : 'neg',
+        style: scarto >= 0
+          ? 'left:50%;width:' + w + '%'
+          : 'right:50%;width:' + w + '%'
+      })
+    ]);
+    return h('td', { class: 'varcell' }, [bar]);
+  }
+
+  function tabella(cols, righe, foot) {
+    var thead = h('thead', {}, [h('tr', {}, cols.map(function (c) {
+      return h('th', { class: c.num ? 'num' : (c.cls || ''), text: c.label || '' });
+    }))]);
+    var tbody = h('tbody', {}, righe);
+    var parts = [thead, tbody];
+    if (foot) parts.push(h('tfoot', {}, [foot]));
+    return h('div', { class: 'tablewrap' }, [h('table', {}, parts)]);
+  }
+
+  /* ---------- vista: recap -------------------------------------------------- */
+  function viewRecap() {
+    var m = state.model, f = filtro();
+    var righe = Model.varianceTable(m, f);
+    var tot = Model.totals(righe);
+    var scartoTot = tot.act - tot.bdg;
+    var cantLabel = state.inclCantiere ? '' : ' (cantiere escluso)';
+    var out = [];
+
+    out.push(h('section', { class: 'card' }, [kpis([
+      { k: 'Speso (' + NOME[state.persona] + ')', v: Fmt.eur(tot.act), s: etichettaMesi() },
+      { k: 'Budget', v: Fmt.eur(tot.bdg), s: 'stesso perimetro' },
+      {
+        k: 'Scostamento', v: Fmt.signed(scartoTot) + ' €',
+        tone: scartoTot > 0 ? 'over' : 'under',
+        s: tot.bdg ? Fmt.pct(scartoTot / Math.abs(tot.bdg)) + ' vs budget' : ''
+      }
+    ], 'kpis-compact')]));
+
+    // seconda riga KPI, identica per dimensione alla precedente: stipendio,
+    // spese e saving, ricalcolati in base ai filtri/selezioni correnti
+    // (persona, mesi, toggle ristrutturazione) esattamente come la riga sopra.
+    var stipendioTot = Model.stipendioTotale(m, state.persona, f.mesi);
+    var savingTot = stipendioTot - tot.act;
+
+    // Saving medio mensile: divide il saving per il numero di mesi che
+    // hanno davvero dati (stipendio o spese), tra quelli selezionati;
+    // senza filtro guarda tutti e 12 i mesi.
+    var stipMesi = state.persona === 'jack' ? m.stipendi.jack
+      : state.persona === 'otti' ? m.stipendi.otti : m.stipendi.tot;
+    var perimetro = f.mesi.length ? f.mesi : [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+    var nMesi = perimetro.filter(function (mm) {
+      return stipMesi[mm - 1] > 0 || m.mesiConDati.indexOf(mm) >= 0;
+    }).length;
+    var savingMese = nMesi ? savingTot / nMesi : 0;
+
+    out.push(h('section', { class: 'card' }, [kpis([
+      { k: 'Stipendio (' + NOME[state.persona] + ')', v: Fmt.eur(stipendioTot), s: etichettaMesi() },
+      { k: 'Spese', v: Fmt.eur(tot.act), s: state.inclCantiere ? 'incl. ristrutturazione' : 'cantiere escluso' },
+      {
+        k: 'Saving',
+        v: Fmt.signed(savingTot) + ' €' + (nMesi ? ' (' + Fmt.eur(savingMese) + '/mese)' : ''),
+        tone: savingTot >= 0 ? 'under' : 'over',
+        s: stipendioTot ? Fmt.pct(savingTot / stipendioTot) + ' dello stipendio' : ''
+      }
+    ], 'kpis-compact')]));
+
+    // grafici: stipendio/spese/saving + torta composizione
+    var serieIS = Model.monthlyIncomeVsSpese(m, state.inclCantiere);
+    var hostChart = chartHost('chart-half');
+    var mainColor = state.persona === 'jack' ? 'var(--jack)' : state.persona === 'otti' ? 'var(--otti)' : 'var(--tot)';
+    var chartCard = card('Andamento mensile',
+      'A sinistra lo stipendio, a destra spese + saving/overrun. Mesi futuri = stima. Tocca un mese per filtrarlo.',
+      h('div', {}, [
+        legend([
+          { color: mainColor, label: 'Stipendio (sx) / Spese (dx)' },
+          { color: '#E8A838', label: 'Saving' },
+          { color: 'var(--over)', label: 'Overrun' }
+        ]),
+        hostChart
+      ]), true);
+
+    var top9 = righe.slice(0, 9);
+    var resto = righe.slice(9).reduce(function (a, r) { return a + Math.max(0, r.act); }, 0);
+    var slices = top9.map(function (r, i) {
+      return { label: r.categoria, value: Math.max(0, r.act), color: Charts.palette[i % Charts.palette.length] };
+    });
+    if (resto > 0) slices.push({ label: 'Altre voci', value: resto, color: '#B9C2CC' });
+    var hostDonut = chartHost('chart-donut');
+    var donutCard = card('Composizione', 'Spese actual di ' + NOME[state.persona].toLowerCase() + ' per categoria',
+      hostDonut, true);
+
+    out.push(h('div', { class: 'grid2b' }, [chartCard, donutCard]));
+
+    // tabella di varianza, sotto i grafici
+    var scala = righe.reduce(function (a, r) { return Math.max(a, Math.abs(r.scarto)); }, 0);
+    var trs = righe.map(function (r) {
+      return h('tr', {}, [
+        h('td', { class: 'cat' }, [document.createTextNode(r.categoria)]),
+        h('td', { class: 'num', text: Fmt.n(r.act) }),
+        h('td', { class: 'num', text: Fmt.n(r.bdg) }),
+        h('td', { class: 'num varnum ' + (r.scarto >= 0 ? 'over' : 'under'), text: Fmt.signed(r.scarto) }),
+        varCell(r.scarto, scala),
+        h('td', { class: 'num', text: Fmt.pct(r.scartoPct) }),
+        h('td', {}, [h('button', {
+          class: 'rowbtn', type: 'button', text: 'Dettagli',
+          onclick: function () { state.categoria = r.categoria; state.noteAperta = null; go('dettaglio'); }
+        })])
+      ]);
+    });
+    var foot = h('tr', {}, [
+      h('td', { text: 'Totale' }),
+      h('td', { class: 'num', text: Fmt.n(tot.act) }),
+      h('td', { class: 'num', text: Fmt.n(tot.bdg) }),
+      h('td', { class: 'num varnum ' + (scartoTot >= 0 ? 'over' : 'under'), text: Fmt.signed(scartoTot) }),
+      h('td', {}), h('td', { class: 'num', text: tot.bdg ? Fmt.pct(scartoTot / Math.abs(tot.bdg)) : '—' }),
+      h('td', {})
+    ]);
+    var tab = righe.length ? tabella([
+      { label: 'Spesa' }, { label: 'Actual', num: true }, { label: 'Budget', num: true },
+      { label: 'Var', num: true }, { label: '' }, { label: 'Var %', num: true }, { label: '' }
+    ], trs, foot) : h('div', { class: 'empty', text: 'Nessuna spesa nei mesi selezionati.' });
+    out.push(card('Varianza per categoria',
+      'Actual e budget di ' + NOME[state.persona] + cantLabel + '.',
+      tab, true));
+
+    render(out);
+
+    Charts.monthlyIncomeExpense(hostChart, serieIS, {
+      persona: state.persona,
+      tick: function (d) { return MESI_BREVI[d.mese - 1]; },
+      label: function (d) { return MESI[d.mese - 1]; },
+      selected: function (d) { return state.mesi.indexOf(d.mese) >= 0; },
+      onPick: function (d) { toggleMese(d.mese); }
+    });
+
+    Charts.donut(hostDonut, slices, {
+      centerTop: Charts.kfmt(tot.act),
+      centerBottom: 'speso ' + NOME[state.persona].toLowerCase(),
+      onPick: function (sl) {
+        if (sl.label === 'Altre voci') return;
+        state.categoria = sl.label; state.noteAperta = null; go('dettaglio');
+      }
+    });
+  }
+
+  /* ---------- vista: dettaglio spese --------------------------------------- */
+  // Si arriva qui solo toccando "Dettagli" su una riga del Recap (o una voce
+  // del budget): la pagina mostra subito le note della categoria scelta,
+  // senza l'elenco delle categorie. "Chiudi" riporta sempre al Recap.
+  function viewDettaglio() {
+    var m = state.model, f = filtro();
+    var out = [];
+
+    if (!state.categoria) {
+      out.push(card('Dettaglio spese', null,
+        h('div', { class: 'empty', text: 'Tocca "Dettagli" su una voce del Recap per vederne il dettaglio.' }),
+        true));
+      render(out);
+      return;
+    }
+
+    // Il valore mostrato segue la persona selezionata in testata: se sei
+    // sul dettaglio e cambi Jack/Otti/Totale, la tabella si aggiorna con
+    // quella selezione, sovrascrivendo quanto viste arrivando dal Recap.
+    function pv(riga) {
+      return state.persona === 'jack' ? riga.jack : state.persona === 'otti' ? riga.otti : riga.importo;
+    }
+
+    var det = Model.detailByNote(m, state.categoria, f);
+    var totDet = det.reduce(function (a, r) { return a + pv(r); }, 0);
+
+    var body = [];
+    det.forEach(function (r) {
+      var aperto = state.noteAperta === r.note;
+      body.push(h('tr', { class: aperto ? 'is-open' : '' }, [
+        h('td', { class: 'note' }, [document.createTextNode(r.note),
+          h('div', {
+            class: 'sub',
+            text: r.mesiLista.map(function (x) { return MESI_BREVI[x - 1]; }).join(' · ')
+          })]),
+        h('td', { class: 'num', text: Fmt.n(pv(r)) }),
+        h('td', {}, [h('button', {
+          class: 'rowbtn', type: 'button', 'aria-expanded': aperto ? 'true' : 'false',
+          text: r.n > 1 ? String(r.n) + ' voci' : 'Vedi',
+          onclick: function () { state.noteAperta = aperto ? null : r.note; draw(); }
+        })])
+      ]));
+      if (aperto) {
+        Model.movimenti(m, state.categoria, r.note, f).forEach(function (mv) {
+          body.push(h('tr', {}, [
+            h('td', { class: 'note' }, [
+              h('span', { class: 'sub', text: (mv.data ? Fmt.data(mv.data) + ' · ' : '') + MESI[mv.mese - 1] }),
+              mv.noteExtra ? h('div', { class: 'sub', text: mv.noteExtra }) : null,
+              h('div', { class: 'sub', text: mv.chi + (mv.familiare ? ' · familiare' : ' · individuale') })
+            ]),
+            h('td', { class: 'num', text: Fmt.n2(pv(mv)) }),
+            h('td', {})
+          ]));
+        });
+      }
+    });
+
+    var footDet = h('tr', {}, [
+      h('td', { text: 'Totale' }),
+      h('td', { class: 'num', text: Fmt.n(totDet) }),
+      h('td', {})
+    ]);
+
+    function chiudi() { state.categoria = null; state.noteAperta = null; go('recap'); }
+
+    var head = h('div', { class: 'card-head', style: 'justify-content:space-between;align-items:center;flex-wrap:nowrap' }, [
+      h('div', {}, [
+        h('h3', { text: state.categoria }),
+        h('p', { text: 'Dettaglio per nota — tocca una riga per vedere i singoli movimenti' })
+      ]),
+      h('button', { class: 'btn small', type: 'button', text: 'Chiudi', onclick: chiudi })
+    ]);
+    var tableNode = det.length ? tabella([
+      { label: 'Nota' }, { label: 'Importo (' + NOME[state.persona] + ')', num: true }, { label: '' }
+    ], body, footDet) : h('div', { class: 'empty', text: 'Nessun movimento con questi filtri.' });
+
+    out.push(h('section', { class: 'card' }, [head, h('div', { class: 'card-body flush' }, [tableNode])]));
+
+    // andamento della categoria
+    var serie = Model.monthlySpese(m, filtro());
+    var host = chartHost();
+    out.push(card('Andamento di ' + state.categoria, 'Importi in migliaia di euro',
+      h('div', {}, [legend([{ color: 'var(--jack)', label: 'Jack' }, { color: 'var(--otti)', label: 'Otti' }]), host]),
+      true));
+
+    render(out);
+    Charts.stackedMonths(host, serie, {
+      tick: function (d) { return MESI_BREVI[d.mese - 1]; },
+      label: function (d) { return MESI[d.mese - 1]; },
+      selected: function (d) { return state.mesi.indexOf(d.mese) >= 0; },
+      onPick: function (d) { toggleMese(d.mese); }
+    });
+  }
+
+  /* ---------- vista: ristrutturazione -------------------------------------- */
+  function viewCantiere() {
+    var m = state.model;
+    var f = filtro({ cantiere: true });
+    var det = Model.detailByNote(m, CONFIG.categoriaCantiere, f);
+    var tot = det.reduce(function (a, r) {
+      a.importo += r.importo; a.jack += r.jack; a.otti += r.otti; return a;
+    }, { importo: 0, jack: 0, otti: 0 });
+
+    var out = [];
+    out.push(h('section', { class: 'card' }, [kpis([
+      { k: 'Totale cantiere', v: Fmt.eur(tot.importo), s: etichettaMesi() },
+      { k: 'A carico di Jack', v: Fmt.eur(tot.jack), s: tot.importo ? Fmt.pct(tot.jack / tot.importo) : '' },
+      { k: 'A carico di Otti', v: Fmt.eur(tot.otti), s: tot.importo ? Fmt.pct(tot.otti / tot.importo) : '' }
+    ])]));
+
+    var body = [];
+    det.forEach(function (r) {
+      var aperto = state.noteAperta === 'C:' + r.note;
+      body.push(h('tr', { class: aperto ? 'is-open' : '' }, [
+        h('td', { class: 'note' }, [document.createTextNode(r.note),
+          h('div', {
+            class: 'sub',
+            text: r.mesiLista.map(function (x) { return MESI_BREVI[x - 1]; }).join(' · ')
+          })]),
+        h('td', { class: 'num', text: Fmt.n(r.importo) }),
+        h('td', { class: 'num', text: Fmt.n(r.jack) }),
+        h('td', { class: 'num', text: Fmt.n(r.otti) }),
+        h('td', {}, [h('button', {
+          class: 'rowbtn', type: 'button', 'aria-expanded': aperto ? 'true' : 'false',
+          text: r.n > 1 ? String(r.n) + ' voci' : 'Vedi',
+          onclick: function () { state.noteAperta = aperto ? null : 'C:' + r.note; draw(); }
+        })])
+      ]));
+      if (aperto) {
+        Model.movimenti(m, CONFIG.categoriaCantiere, r.note, f).forEach(function (mv) {
+          body.push(h('tr', {}, [
+            h('td', { class: 'note' }, [
+              h('span', { class: 'sub', text: (mv.data ? Fmt.data(mv.data) + ' · ' : '') + MESI[mv.mese - 1] }),
+              mv.noteExtra ? h('div', { class: 'sub', text: mv.noteExtra }) : null
+            ]),
+            h('td', { class: 'num', text: Fmt.n2(mv.importo) }),
+            h('td', { class: 'num', text: Fmt.n2(mv.jack) }),
+            h('td', { class: 'num', text: Fmt.n2(mv.otti) }),
+            h('td', {})
+          ]));
+        });
+      }
+    });
+
+    var foot = h('tr', {}, [
+      h('td', { text: 'Totale' }),
+      h('td', { class: 'num', text: Fmt.n(tot.importo) }),
+      h('td', { class: 'num', text: Fmt.n(tot.jack) }),
+      h('td', { class: 'num', text: Fmt.n(tot.otti) }),
+      h('td', {})
+    ]);
+
+    out.push(card('Chi ha pagato cosa', 'Voci del cantiere raggruppate per nota',
+      det.length ? tabella([
+        { label: 'Voce' }, { label: 'Importo', num: true },
+        { label: 'Jack', num: true }, { label: 'Otti', num: true }, { label: '' }
+      ], body, foot) : h('div', { class: 'empty', text: 'Nessuna spesa di cantiere nei mesi selezionati.' }), true));
+
+    var serieAll = Model.monthlySpese(m, { persona: 'tot', mesi: [], cantiere: true, categoria: CONFIG.categoriaCantiere });
+    var host = chartHost();
+    out.push(card('Andamento del cantiere', 'Importi in migliaia di euro',
+      h('div', {}, [legend([{ color: 'var(--jack)', label: 'Jack' }, { color: 'var(--otti)', label: 'Otti' }]), host]), true));
+
+    render(out);
+    Charts.stackedMonths(host, serieAll, {
+      tick: function (d) { return MESI_BREVI[d.mese - 1]; },
+      label: function (d) { return MESI[d.mese - 1]; },
+      selected: function (d) { return state.mesi.indexOf(d.mese) >= 0; },
+      onPick: function (d) { toggleMese(d.mese); }
+    });
+  }
+
+  /* ---------- vista: analisi budget ---------------------------------------- */
+  function viewBudget() {
+    var m = state.model, f = filtro();
+    var perTipo = Model.budgetByTipo(m, f);
+    var perCat = Model.budgetByCategoria(m, f);
+    var totBdg = perCat.reduce(function (a, r) { return a + r.importo; }, 0);
+    var righe = Model.varianceTable(m, f);
+    var tot = Model.totals(righe);
+
+    var out = [];
+    out.push(h('section', { class: 'card' }, [kpis([
+      { k: 'Budget ' + NOME[state.persona], v: Fmt.eur(totBdg), s: etichettaMesi() },
+      { k: 'Speso finora', v: Fmt.eur(tot.act), s: totBdg ? Fmt.pct(tot.act / Math.abs(totBdg)) + ' del budget' : '' },
+      {
+        k: 'Residuo', v: Fmt.eur(totBdg - tot.act),
+        tone: (totBdg - tot.act) < 0 ? 'over' : 'under', s: 'budget meno speso'
+      }
+    ])]));
+
+    // composizione: ciambella + elenco
+    var top = perCat.slice(0, 9);
+    var resto = perCat.slice(9).reduce(function (a, r) { return a + r.importo; }, 0);
+    var slices = top.map(function (r, i) {
+      return { label: r.categoria, value: r.importo, color: Charts.palette[i % Charts.palette.length] };
+    });
+    if (resto > 0) slices.push({ label: 'Altre voci', value: resto, color: '#B9C2CC' });
+
+    var hostDonut = chartHost('chart-donut');
+    var maxCat = perCat.reduce(function (a, r) { return Math.max(a, r.importo); }, 0);
+    var elenco = h('div', { class: 'blist' }, perCat.map(function (r) {
+      return h('button', {
+        type: 'button',
+        onclick: function () { state.categoria = r.categoria; state.noteAperta = null; go('dettaglio'); }
+      }, [
+        h('span', { class: 'fill', style: 'width:' + (maxCat ? (r.importo / maxCat * 100) : 0) + '%' }),
+        h('span', { class: 'lab', text: r.categoria }),
+        h('span', { class: 'val', text: Fmt.n(r.importo) })
+      ]);
+    }));
+
+    var tipoTab = tabella(
+      [{ label: 'Tipo spesa' }, { label: 'Budget', num: true }, { label: 'Quota', num: true }],
+      perTipo.map(function (r) {
+        return h('tr', {}, [
+          h('td', { class: 'cat', text: r.tipo }),
+          h('td', { class: 'num', text: Fmt.n(r.importo) }),
+          h('td', { class: 'num', text: totBdg ? Fmt.pct(r.importo / totBdg) : '—' })
+        ]);
+      })
+    );
+
+    var colonna = h('div', {}, [
+      card('Individuale o familiare', null, tipoTab, true),
+      card('Composizione', 'Prime dieci voci di budget', hostDonut, true)
+    ]);
+    var colonna2 = card('Budget per voce', 'Tocca una voce per vedere le spese collegate', elenco, true);
+    out.push(h('div', { class: 'grid2' }, [colonna, colonna2]));
+
+    // andamento mensile del budget con linea dello stipendio
+    var perMese = Model.budgetByMese(m, f);
+    var stip = m.stipendi[state.persona] || [];
+    var conValore = stip.filter(function (v) { return v > 0; });
+    var mediaStip = conValore.length ? conValore.reduce(function (a, b) { return a + b; }, 0) / conValore.length : 0;
+
+    var host = chartHost();
+    out.push(card('Budget mensile',
+      mediaStip ? 'La linea tratteggiata è lo stipendio medio ' + (state.persona === 'tot' ? 'di famiglia' : 'di ' + NOME[state.persona]) : 'Importi in euro',
+      host, true));
+
+    render(out);
+
+    Charts.donut(hostDonut, slices, {
+      centerTop: Charts.kfmt(totBdg),
+      centerBottom: 'budget ' + NOME[state.persona].toLowerCase(),
+      onPick: function (sl) {
+        if (sl.label === 'Altre voci') return;
+        state.categoria = sl.label; state.noteAperta = null; go('dettaglio');
+      }
+    });
+
+    Charts.bars(host, perMese.map(function (r) {
+      return {
+        label: MESI[r.mese - 1], tick: MESI_BREVI[r.mese - 1], value: r.bdg,
+        mese: r.mese, color: COLORE[state.persona]
+      };
+    }), {
+      selected: function (d) { return state.mesi.indexOf(d.mese) >= 0; },
+      onPick: function (d) { toggleMese(d.mese); },
+      refLine: mediaStip ? [{ value: mediaStip, label: 'Stipendio ' + Fmt.n(mediaStip) }] : []
+    });
+  }
+
+  /* ---------- telaio -------------------------------------------------------- */
+  function etichettaMesi() {
+    if (!state.mesi.length) return 'tutti i mesi';
+    if (state.mesi.length === 1) return MESI[state.mesi[0] - 1];
+    return state.mesi.length + ' mesi selezionati';
+  }
+
+  function render(nodes) {
+    var host = clear($('#views'));
+    nodes.forEach(function (n) { host.appendChild(n); });
+  }
+
+  function toggleMese(m) {
+    var i = state.mesi.indexOf(m);
+    if (i >= 0) state.mesi.splice(i, 1); else state.mesi.push(m);
+    state.mesi.sort(function (a, b) { return a - b; });
+    draw();
+  }
+
+  function go(view) {
+    state.view = view;
+    Array.prototype.forEach.call(document.querySelectorAll('#nav button'), function (b) {
+      b.setAttribute('aria-current', b.dataset.v === view ? 'page' : 'false');
+    });
+    draw();
+    window.scrollTo({ top: 0, behavior: 'auto' });
+  }
+
+  function drawFiltri() {
+    var chips = clear($('#monthChips'));
+    for (var m = 1; m <= 12; m++) (function (m) {
+      var attivo = state.mesi.indexOf(m) >= 0;
+      var vuoto = state.model.mesiConDati.indexOf(m) < 0;
+      chips.appendChild(h('button', {
+        class: 'chip' + (vuoto ? ' dim' : ''), type: 'button',
+        'aria-pressed': attivo ? 'true' : 'false',
+        text: MESI[m - 1].charAt(0).toUpperCase() + MESI[m - 1].slice(1),
+        onclick: function () { toggleMese(m); }
+      }));
+    })(m);
+
+    // gestione stato "Azzera filtri"
+    var filtersActive = state.mesi.length > 0 || state.persona !== 'tot' || state.inclCantiere;
+    var btnR = $('#btnReset');
+    if (btnR) {
+      btnR.disabled = !filtersActive;
+    }
+
+    // sync toggle ristrutturazione
+    var chk = $('#chkRistr');
+    if (chk) chk.checked = state.inclCantiere;
+
+    $('#btnAllMonths').disabled = state.mesi.length === 0;
+  }
+
+  function draw() {
+    if (!state.model) return;
+    drawFiltri();
+    if (state.view === 'recap') viewRecap();
+    else if (state.view === 'dettaglio') viewDettaglio();
+    else if (state.view === 'cantiere') viewCantiere();
+    else viewBudget();
+  }
+
+  /* ---------- caricamento --------------------------------------------------- */
+  function messaggio(testo, tipo) {
+    var box = clear($('#loadMsg'));
+    // textContent evita che messaggi d'errore o nomi file possano diventare HTML.
+    if (testo) box.appendChild(h('div', { class: 'msg ' + (tipo || 'info'), text: testo }));
+  }
+
+  // FILE-LOCALE-DISATTIVATO: carica(file) legge un file .xlsx locale con
+  // XlsxReader. Non è più agganciata a nessun pulsante (vedi App.init()),
+  // ma resta qui, funzionante, pronta per quando riattiverai lo screen di
+  // caricamento locale.
+  function carica(file) {
+    if (!file) return;
+    messaggio('Sto leggendo ' + file.name + '…', 'info');
+    DataSource.fromFile(file).then(function (model) {
+      applicaModello(model, file.name, 'letto il');
+    }).catch(function (err) {
+      console.error(err);
+      messaggio('Non sono riuscito a leggere il file. ' +
+        String(err && err.message ? err.message : err), 'err');
+    });
+  }
+
+  // Applica un modello caricato (da Google Sheets API o, se riattivato, da
+  // file locale) e passa dalla schermata di stato alla dashboard vera e
+  // propria. Punto comune usato sia dal caricamento automatico all'avvio,
+  // sia dal pulsante "Aggiorna dati", sia dalla modale "Google Sheet".
+  function applicaModello(model, nomeSorgente, verbo) {
+    state.model = model;
+    state.nomeFile = nomeSorgente;
+    state.categoria = null;
+    state.noteAperta = null;
+    messaggio('');
+    $('#loader').classList.add('hidden');
+    $('#filters').classList.remove('hidden');
+    $('#title').textContent = 'Conti di casa ' + model.anno;
+    $('#meta').textContent = nomeSorgente + ' · ' + model.spese.length + ' movimenti · ' + (verbo || 'aggiornato il') + ' ' +
+      model.caricatoIl.toLocaleString('it-IT', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+// Pre-seleziona i mesi da gennaio ad oggi
+var oggi = new Date();
+var meseOggi = oggi.getMonth() + 1;
+state.mesi = [];
+for (var m = 1; m <= meseOggi; m++) {
+  state.mesi.push(m);
+}
+    draw();
+  }
+
+  // Carica (o ricarica) il solo foglio configurato. Non chiediamo né salviamo
+  // URL di fogli scelti dall'utente: evita errori e non lascia metadati in
+  // localStorage. L'identità autorizzata è verificata da Google ad ogni token.
+  function caricaDaGoogleSheet() {
+    var id = GOOGLE_OAUTH_CONFIG.spreadsheetId;
+    if (!GoogleAuth.configurato() || !id || id === 'INCOLLA_ID_DEL_NUOVO_FOGLIO_PRIVATO') {
+      messaggio('Configurazione incompleta: inserisci Client ID OAuth e ID del nuovo foglio privato nelle costanti GOOGLE_OAUTH_CONFIG.', 'err');
+      return Promise.reject(new Error('Configurazione OAuth incompleta.'));
+    }
+
+    messaggio('Accesso a Google e aggiornamento dati…', 'info');
+    return DataSource.fromGoogleSheetsApi(id).then(function (model) {
+      applicaModello(model, 'Google Sheet privato');
+      aggiornaPulsantiAuth();
+    }).catch(function (err) {
+      console.error(err);
+      messaggio('Non sono riuscito ad aggiornare dal Google Sheet. ' +
+        String(err && err.message ? err.message : err) +
+        ' Verifica che il foglio sia Limitato e condiviso con l’account Google scelto, che la Sheets API sia attiva e che l’origine autorizzata sia corretta.', 'err');
+      aggiornaPulsantiAuth();
+      throw err;
+    });
+  }
+
+  function aggiornaPulsantiAuth() {
+    var autenticato = GoogleAuth.attivo();
+    $('#btnLogin').disabled = autenticato;
+    $('#btnReload').disabled = !autenticato;
+    $('#btnLogout').disabled = !autenticato;
+  }
+
+  /* ---------- avvio --------------------------------------------------------- */
+  function init() {
+    // FILE-LOCALE-DISATTIVATO-INIZIO
+    // Selettore/drag&drop del file Excel locale: disattivato (v6 legge il
+    // Google Sheet automaticamente tramite le API). Per riattivarlo, togli i
+    // delimitatori di commento JS /* e */ qui sotto — e riattiva anche il
+    // markup corrispondente in HTML (cerca "FILE-LOCALE-DISATTIVATO" nella
+    // pagina, sia nella sezione #loader sia sull'<input type="file">).
+    /*
+    var input = $('#file');
+    $('#btnPick').addEventListener('click', function () { input.click(); });
+    input.addEventListener('change', function () {
+      if (input.files && input.files[0]) carica(input.files[0]);
+      input.value = '';
+    });
+
+    var drop = $('#drop');
+    ['dragenter', 'dragover'].forEach(function (e) {
+      drop.addEventListener(e, function (ev) { ev.preventDefault(); drop.classList.add('hover'); });
+    });
+    ['dragleave', 'drop'].forEach(function (e) {
+      drop.addEventListener(e, function (ev) { ev.preventDefault(); drop.classList.remove('hover'); });
+    });
+    drop.addEventListener('drop', function (ev) {
+      if (ev.dataTransfer && ev.dataTransfer.files[0]) carica(ev.dataTransfer.files[0]);
+    });
+    */
+    // FILE-LOCALE-DISATTIVATO-FINE
+
+    // Primo accesso: gesto esplicito dell'utente. Google può mostrare scelta
+    // dell'account/consenso; negli accessi successivi di solito è trasparente.
+    $('#btnLogin').addEventListener('click', function () {
+      caricaDaGoogleSheet().catch(function () { /* messaggio già mostrato */ });
+    });
+    // Se il token scade, Google richiede un nuovo gesto: questo è il percorso
+    // previsto per ottenere un token fresco senza conservarne uno sul device.
+    $('#btnReload').addEventListener('click', function () {
+      caricaDaGoogleSheet().catch(function () { /* messaggio già mostrato */ });
+    });
+    $('#btnLogout').addEventListener('click', function () {
+      // "Esci" cancella il solo token in memoria; non revoca il consenso.
+      GoogleAuth.esci();
+      aggiornaPulsantiAuth();
+      $('#loader').classList.remove('hidden');
+      $('#filters').classList.add('hidden');
+      messaggio('Sessione locale chiusa. I dati non sono salvati in questa PWA.', 'info');
+    });
+
+    Array.prototype.forEach.call(document.querySelectorAll('.seg button'), function (b) {
+      b.addEventListener('click', function () {
+        state.persona = b.dataset.p;
+        Array.prototype.forEach.call(document.querySelectorAll('.seg button'), function (x) {
+          x.setAttribute('aria-pressed', x === b ? 'true' : 'false');
+        });
+        draw();
+      });
+    });
+
+    Array.prototype.forEach.call(document.querySelectorAll('#nav button'), function (b) {
+      b.addEventListener('click', function () { go(b.dataset.v); });
+    });
+
+    $('#btnAllMonths').addEventListener('click', function () { state.mesi = []; draw(); });
+
+    // Se cambia la larghezza della finestra, ridisegna i grafici con le
+    // nuove misure (aspetta 200 ms che il ridimensionamento finisca).
+    var ultimaLarghezza = window.innerWidth, timerResize;
+    window.addEventListener('resize', function () {
+      if (window.innerWidth === ultimaLarghezza) return;
+      ultimaLarghezza = window.innerWidth;
+      clearTimeout(timerResize);
+      timerResize = setTimeout(draw, 200);
+    });
+
+    // Toggle ristrutturazione
+    var chkRistr = $('#chkRistr');
+    if (chkRistr) {
+      chkRistr.addEventListener('change', function () {
+        state.inclCantiere = chkRistr.checked;
+        draw();
+      });
+    }
+
+    // Azzera filtri: riporta tutto allo stato base, cantiere OFF
+    $('#btnReset').addEventListener('click', function () {
+      state.mesi = [];
+      state.categoria = null;
+      state.noteAperta = null;
+      state.persona = 'tot';
+      state.inclCantiere = false;
+      if (chkRistr) chkRistr.checked = false;
+      Array.prototype.forEach.call(document.querySelectorAll('.seg button'), function (x) {
+        x.setAttribute('aria-pressed', x.dataset.p === 'tot' ? 'true' : 'false');
+      });
+      if (state.view === 'dettaglio') go('recap'); else draw();
+    });
+
+    // Non avviamo il fetch automaticamente: niente dati o token prima del
+    // consenso. Ciò permette di pubblicare la PWA senza rendere pubblico il foglio.
+    aggiornaPulsantiAuth();
+    messaggio('Premi “Accedi con Google” e scegli un account autorizzato al foglio.', 'info');
+  }
+
+  return { init: init, _state: state };
+})();
+
+/* ============================================================================
+   CONFIGURAZIONE PRIVATA (DA COMPLETARE PRIMA DEL DEPLOY)
+   ----------------------------------------------------------------------------
+   1) Crea un OAuth Client ID di tipo "Applicazione web" nel tuo progetto
+      Google Cloud e inseriscilo qui. Un Client ID NON è una password: può
+      essere pubblico. Non inserire mai qui un Client Secret o una API key.
+   2) Crea una COPIA NUOVA del foglio e imposta "Accesso generale: Limitato".
+      Condividilo direttamente solo con i tuoi account Google autorizzati.
+   3) Incolla l'ID della nuova copia qui sotto. L'ID non è una credenziale;
+      se il foglio è Limitato, conoscerlo non concede alcun accesso.
+   ========================================================================== */
+var GOOGLE_OAUTH_CONFIG = {
+  // Client ID OAuth pubblico: non è un segreto e non serve nasconderlo.
+  clientId: '177628124658-c9km173ch1v1ph1akoqvmapjgpo1pt0s.apps.googleusercontent.com',
+  // Questo foglio DEVE essere impostato su "Accesso generale: Limitato".
+  spreadsheetId: '1kJn6t--UjFmxZ9q_Y8m8MNjjccmGkqhLiEOPsed4yhY',
+  // Scope minimo per la dashboard attuale: sola lettura dei fogli autorizzati.
+  scope: 'https://www.googleapis.com/auth/spreadsheets.readonly'
+};
+
+/* ============================================================================
+   GoogleAuth — token OAuth temporaneo, soltanto in memoria
+   ----------------------------------------------------------------------------
+   Non usiamo refresh token, localStorage, sessionStorage, IndexedDB o cookie.
+   Dopo una ricarica/riapertura l'utente preme di nuovo "Accedi"; se conserva
+   la sessione Google e il consenso, in genere non deve reinserire password.
+   ========================================================================== */
+var GoogleAuth = (function () {
+  'use strict';
+  var token = null;
+  var scadeAlle = 0;
+  var tokenClient = null;
+
+  function configurato() {
+    return GOOGLE_OAUTH_CONFIG.clientId &&
+      GOOGLE_OAUTH_CONFIG.clientId !== 'INCOLLA_CLIENT_ID.apps.googleusercontent.com' &&
+      GOOGLE_OAUTH_CONFIG.spreadsheetId &&
+      GOOGLE_OAUTH_CONFIG.spreadsheetId !== 'INCOLLA_ID_DEL_NUOVO_FOGLIO_PRIVATO';
+  }
+  function attivo() { return !!token && Date.now() < scadeAlle - 30000; }
+
+  function attendiGIS() {
+    return new Promise(function (resolve, reject) {
+      var fine = Date.now() + 10000;
+      (function controlla() {
+        if (window.google && google.accounts && google.accounts.oauth2) return resolve();
+        if (Date.now() > fine) return reject(new Error('La libreria di accesso Google non è disponibile. Controlla la connessione e la Content Security Policy.'));
+        setTimeout(controlla, 50);
+      })();
+    });
+  }
+
+  function ottieniToken() {
+    if (attivo()) return Promise.resolve(token);
+    if (!configurato()) return Promise.reject(new Error('Client ID OAuth o Spreadsheet ID non configurato.'));
+    return attendiGIS().then(function () {
+      return new Promise(function (resolve, reject) {
+        // Il callback viene impostato per ogni richiesta, così non conserviamo
+        // alcuna risposta o token oltre la durata necessaria della sessione.
+        tokenClient = google.accounts.oauth2.initTokenClient({
+          client_id: GOOGLE_OAUTH_CONFIG.clientId,
+          scope: GOOGLE_OAUTH_CONFIG.scope,
+          callback: function (risposta) {
+            if (!risposta || risposta.error || !risposta.access_token) {
+              return reject(new Error((risposta && (risposta.error_description || risposta.error)) || 'Accesso Google annullato.'));
+            }
+            token = risposta.access_token;
+            scadeAlle = Date.now() + (Number(risposta.expires_in) || 3600) * 1000;
+            resolve(token);
+          }
+        });
+        // Il primo accesso mostra account/consenso se necessario. `prompt: ''`
+        // non forza il consenso a ogni apertura: Google può riusare quello già
+        // accordato allo stesso Client ID e account. La chiamata avviene sempre
+        // da un click, come richiesto per un nuovo token alla scadenza.
+        tokenClient.requestAccessToken({ prompt: '' });
+      });
+    });
+  }
+
+  function esci() { token = null; scadeAlle = 0; tokenClient = null; }
+  return { configurato: configurato, attivo: attivo, ottieniToken: ottieniToken, esci: esci };
+})();
+
+/* ============================================================================
+   GSheetsApi — lettura online del Google Sheet tramite le Google Sheets API
+   ----------------------------------------------------------------------------
+   Nessun download di file .xlsx: legge i valori delle celle direttamente in
+   JSON (spreadsheets.get per l'elenco fogli, spreadsheets.values:batchGet per
+   i dati), con il token OAuth temporaneo dell'utente autenticato su un foglio
+   privato. Non esiste una API key nel client.
+   Espone la STESSA interfaccia del workbook di XlsxReader (has/rows), così
+   Model.fromWorkbook() funziona identico sia con questa fonte sia, se un
+   domani riattiverai lo screen di caricamento, con un file locale.
+   ========================================================================== */
+var GSheetsApi = (function () {
+  'use strict';
+
+  var BASE = 'https://sheets.googleapis.com/v4/spreadsheets/';
+
+  function apiError(r) {
+    return r.json().catch(function () { return null; }).then(function (body) {
+      var msg = body && body.error && body.error.message ? body.error.message : ('HTTP ' + r.status);
+      if (r.status === 401) {
+        msg += ' — il token è scaduto: premi “Aggiorna dati” e accedi di nuovo.';
+      } else if (r.status === 403) {
+        msg += ' — l’account Google scelto non è autorizzato al foglio. Mantieni il foglio “Limitato” e condividilo solo con gli account previsti.';
+      } else if (r.status === 404) {
+        msg += ' — controlla che lo Spreadsheet ID sia corretto.';
+      }
+      var e = new Error(msg);
+      e.status = r.status;
+      throw e;
+    });
+  }
+
+  // Converte in oggetti Date le celle numeriche (seriali) delle colonne la
+  // cui intestazione è "Data" o "Mese": stessa epoca usata da XlsxReader
+  // (giorno 0 = 30/12/1899), così Model — che in un paio di punti si aspetta
+  // "instanceof Date" come ripiego quando la colonna Mese non è valorizzata —
+  // si comporta allo stesso modo sia col file locale sia con le API.
+  var EPOCA_SERIALE = Date.UTC(1899, 11, 30);
+  function serialeADate(n) { return new Date(EPOCA_SERIALE + Math.round(n * 86400000)); }
+  function convertiColonneData(rows) {
+    var headerRow = -1;
+    for (var r = 0; r < Math.min(rows.length, 10) && headerRow < 0; r++) {
+      var row = rows[r] || [];
+      for (var c = 0; c < row.length; c++) {
+        var t = String(row[c] == null ? '' : row[c]).toLowerCase().trim();
+        if (t === 'data' || t === 'mese') { headerRow = r; break; }
+      }
+    }
+    if (headerRow < 0) return rows;
+    var cols = [];
+    (rows[headerRow] || []).forEach(function (v, c) {
+      var t = String(v == null ? '' : v).toLowerCase().trim();
+      if (t === 'data' || t === 'mese') cols.push(c);
+    });
+    for (var i = headerRow + 1; i < rows.length; i++) {
+      var rr = rows[i];
+      if (!rr) continue;
+      cols.forEach(function (c) {
+        var v = rr[c];
+        if (typeof v === 'number' && v > 20000 && v < 80000) rr[c] = serialeADate(v);
+      });
+    }
+    return rows;
+  }
+
+  // Elenco dei fogli realmente presenti nello spreadsheet (serve a capire
+  // quali fogli opzionali — Stipendi J, Dash Otti 26 — esistono davvero,
+  // senza dover tentare ranges a vuoto).
+  function richiesta(url, accessToken) {
+    return fetch(url, {
+      method: 'GET',
+      headers: { Authorization: 'Bearer ' + accessToken },
+      // Evita che il browser riutilizzi/cachi risposte contenenti spese.
+      cache: 'no-store',
+      credentials: 'omit'
+    });
+  }
+
+  function metadata(spreadsheetId, accessToken) {
+    var url = BASE + encodeURIComponent(spreadsheetId) +
+      '?fields=' + encodeURIComponent('sheets.properties.title');
+    return richiesta(url, accessToken).then(function (r) {
+      if (!r.ok) return apiError(r);
+      return r.json();
+    }).then(function (json) {
+      var titoli = {};
+      (json.sheets || []).forEach(function (s) {
+        if (s.properties && s.properties.title) titoli[s.properties.title] = true;
+      });
+      return titoli;
+    });
+  }
+
+  // Legge, in un'unica chiamata, i valori grezzi (non formattati; date come
+  // numero seriale) di più fogli.
+  function valuesBatch(spreadsheetId, accessToken, sheetNames) {
+    var qs = sheetNames.map(function (n) {
+      return 'ranges=' + encodeURIComponent("'" + n.replace(/'/g, "''") + "'");
+    }).join('&');
+    var url = BASE + encodeURIComponent(spreadsheetId) + '/values:batchGet?' + qs +
+      '&valueRenderOption=UNFORMATTED_VALUE&dateTimeRenderOption=SERIAL_NUMBER';
+    return richiesta(url, accessToken).then(function (r) {
+      if (!r.ok) return apiError(r);
+      return r.json();
+    }).then(function (json) {
+      var out = {};
+      (json.valueRanges || []).forEach(function (vr, i) {
+        out[sheetNames[i]] = convertiColonneData(vr.values || []);
+      });
+      return out;
+    });
+  }
+
+  function open(spreadsheetId, accessToken) {
+    if (!spreadsheetId) return Promise.reject(new Error('Manca lo Spreadsheet ID del Google Sheet.'));
+    if (!accessToken) return Promise.reject(new Error('Manca il token di accesso Google.'));
+    var f = CONFIG.fogli;
+    var tutti = [f.spese, f.budget, f.stipendiJack, f.stipendiOtti];
+
+    return metadata(spreadsheetId, accessToken).then(function (titoli) {
+      var presenti = tutti.filter(function (n) { return titoli[n]; });
+      if (!presenti.length) {
+        return { has: function () { return false; }, rows: function () { return Promise.resolve([]); } };
+      }
+      return valuesBatch(spreadsheetId, accessToken, presenti).then(function (data) {
+        return {
+          has: function (name) { return !!data[name]; },
+          rows: function (name) { return Promise.resolve(data[name] || []); }
+        };
+      });
+    });
+  }
+
+  return { open: open };
+})();
+
+/* ============================================================================
+   SORGENTE DATI
+   ----------------------------------------------------------------------------
+   Unico punto di contatto tra l'interfaccia e i dati. fromGoogleSheetsApi()
+   ottiene prima un token OAuth temporaneo e solo poi invoca l'API.
+   fromFile() legge un file locale con XlsxReader: resta qui pronta per
+   quando riattiverai lo screen di caricamento locale (vedi
+   "FILE-LOCALE-DISATTIVATO" più sopra nel file).
+   ========================================================================== */
+var DataSource = {
+  fromGoogleSheetsApi: function (spreadsheetId) {
+    return GoogleAuth.ottieniToken().then(function (accessToken) {
+      return GSheetsApi.open(spreadsheetId, accessToken);
+    }).then(function (wb) { return Model.fromWorkbook(wb); });
+  },
+
+  fromFile: function (file) {
+    return XlsxReader.open(file).then(function (wb) { return Model.fromWorkbook(wb); });
+  }
+};
+
+document.addEventListener('DOMContentLoaded', function () {
+  App.init();
+  // PWA offline per la sola "scocca" dell'app. Il service worker non intercetta
+  // né mette in cache richieste a Google Sheets, token OAuth o dati finanziari.
+  if ('serviceWorker' in navigator && location.protocol === 'https:') {
+    navigator.serviceWorker.register('./sw.js').catch(function (err) {
+      console.warn('Service worker non installato:', err);
+    });
+  }
+});
+</script>
+</body>
+</html>

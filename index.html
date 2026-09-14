@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#F4F7FF">
+<meta name="color-scheme" content="light">
+<meta name="description" content="Dashboard personale per reminder, to do e finanza familiare.">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'self'; object-src 'none'; form-action 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline' https://accounts.google.com; connect-src 'self' https://accounts.google.com https://sheets.googleapis.com https://www.googleapis.com https://calendar.googleapis.com; frame-src https://accounts.google.com">
+<title>Dashboard personale</title>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<style>
+:root{
+  --bg:#F4F7FF;--surface:#FFFFFF;--surface-2:#F8FAFF;--line:#E5EAF3;--line-strong:#D8E0EC;
+  --ink:#172033;--ink-soft:#64748B;--ink-faint:#94A3B8;
+  --blue:#5B7CFA;--blue-soft:#EEF2FF;--purple:#8B5CF6;--purple-soft:#F3EFFF;
+  --green:#10B981;--green-soft:#ECFDF5;--amber:#F59E0B;--amber-soft:#FFF7E6;
+  --red:#EF4444;--red-soft:#FEF2F2;--radius:22px;--radius-sm:14px;
+  --shadow:0 14px 34px rgba(31,41,55,.08);--sans:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+}
+*{box-sizing:border-box}html,body{margin:0;padding:0;min-height:100%;background:var(--bg);color:var(--ink);font-family:var(--sans)}
+body{padding-bottom:38px}button,input,textarea,select{font:inherit;color:inherit}button{cursor:pointer}.hidden{display:none!important}
+.shell{max-width:1080px;margin:0 auto;padding:18px 16px 40px}.topbar{display:flex;align-items:center;gap:12px;margin-bottom:18px}
+.brand{display:flex;align-items:center;gap:11px;min-width:0;margin-right:auto}.logo{width:42px;height:42px;border-radius:15px;background:linear-gradient(145deg,#6F8BFF,#4E6FEF);display:grid;place-items:center;color:#fff;font-weight:850;box-shadow:0 8px 20px rgba(91,124,250,.23)}
+.eyebrow{font-size:.69rem;text-transform:uppercase;letter-spacing:.1em;color:var(--ink-faint);font-weight:850}.brand h1{margin:2px 0 0;font-size:1.13rem;letter-spacing:-.02em}
+.btn{border:1px solid var(--line);background:var(--surface);border-radius:13px;padding:9px 12px;font-size:.78rem;font-weight:800}.btn:hover{background:var(--surface-2)}.btn.primary{border-color:var(--blue);background:var(--blue);color:#fff}.btn.ghost{background:transparent}.btn.small{padding:6px 9px;font-size:.71rem}
+.status{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:7px 10px;font-size:.7rem;color:var(--ink-soft);font-weight:750}.status-dot{width:7px;height:7px;border-radius:50%;background:var(--ink-faint)}.status.online .status-dot{background:var(--green)}
+.hero{background:linear-gradient(135deg,#637FF5 0%,#7C66E9 100%);border-radius:27px;padding:25px;color:#fff;box-shadow:0 18px 42px rgba(91,124,250,.17);position:relative;overflow:hidden;margin-bottom:16px}.hero:after{content:"";position:absolute;width:235px;height:235px;border-radius:50%;background:rgba(255,255,255,.075);right:-85px;top:-115px}.hero h2{margin:0 0 6px;font-size:1.55rem;letter-spacing:-.035em;position:relative;z-index:1}.hero p{margin:0;opacity:.84;font-size:.88rem;max-width:620px;position:relative;z-index:1}.hero-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px;position:relative;z-index:1}.hero .btn{border-color:rgba(255,255,255,.23);background:rgba(255,255,255,.13);color:#fff}.hero .btn.primary{background:#fff;color:#526DE0;border-color:#fff}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}.panel{background:var(--surface);border:1px solid var(--line);border-radius:22px;overflow:hidden;min-height:360px}.panel-head{padding:16px 17px 13px;display:flex;align-items:flex-start;gap:12px;border-bottom:1px solid var(--line)}.panel-icon{width:39px;height:39px;border-radius:13px;display:grid;place-items:center;font-weight:900;flex:0 0 auto}.panel-icon.rem{background:var(--amber-soft);color:var(--amber)}.panel-icon.todo{background:var(--green-soft);color:var(--green)}.panel-title{min-width:0;margin-right:auto}.panel-title h2{font-size:.97rem;margin:0}.panel-title p{font-size:.7rem;color:var(--ink-faint);margin:3px 0 0;line-height:1.35}.count{font-size:.72rem;font-weight:850;background:var(--surface-2);border-radius:999px;padding:5px 8px;color:var(--ink-soft)}
+.list{padding:6px 10px 11px}.item{display:grid;grid-template-columns:31px minmax(0,1fr) auto;align-items:center;gap:10px;padding:11px 7px;border-top:1px solid var(--line)}.item:first-child{border-top:0}.check{width:25px;height:25px;border-radius:9px;border:1.5px solid var(--line-strong);background:#fff;display:grid;place-items:center;color:#fff;padding:0;transition:.15s}.check:hover{border-color:var(--blue);background:var(--blue-soft)}.check.busy{background:var(--green);border-color:var(--green)}.check.busy:after{content:"✓";font-size:.78rem;font-weight:900}.item-main{min-width:0}.item-title{font-size:.84rem;font-weight:780;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.item-sub{font-size:.69rem;color:var(--ink-faint);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.when{font-size:.66rem;font-weight:850;padding:5px 8px;border-radius:999px;white-space:nowrap;background:var(--blue-soft);color:var(--blue)}.when.today{background:var(--red-soft);color:var(--red)}.when.soon{background:var(--amber-soft);color:#B77900}.empty{padding:38px 20px;text-align:center;color:var(--ink-faint);font-size:.78rem}.empty-glyph{width:44px;height:44px;border-radius:14px;background:var(--surface-2);display:grid;place-items:center;margin:0 auto 10px;font-size:1.05rem;color:var(--ink-soft)}
+.finance{margin-top:14px;background:var(--surface);border:1px solid var(--line);border-radius:22px;padding:15px 16px;display:flex;align-items:center;gap:13px;box-shadow:0 4px 16px rgba(31,41,55,.025)}.finance-icon{width:42px;height:42px;border-radius:14px;background:var(--blue-soft);color:var(--blue);display:grid;place-items:center;font-weight:900;font-size:1.1rem}.finance-copy{min-width:0;margin-right:auto}.finance-copy h3{font-size:.9rem;margin:0}.finance-copy p{font-size:.7rem;color:var(--ink-faint);margin:3px 0 0}.finance-open{border:0;background:var(--blue-soft);color:var(--blue);border-radius:12px;padding:8px 10px;font-size:.72rem;font-weight:850}
+.notice{margin-top:12px;padding:10px 12px;border-radius:14px;background:var(--amber-soft);color:#8A6100;font-size:.72rem;line-height:1.45;border:1px solid #F7E3AF}.notice strong{font-weight:850}
+.overlay{position:fixed;inset:0;background:rgba(15,23,42,.38);z-index:90;display:flex;align-items:flex-end;justify-content:center;padding:14px}.sheet{background:var(--surface);width:min(560px,100%);max-height:91vh;overflow:auto;border-radius:28px;padding:18px;box-shadow:0 24px 70px rgba(15,23,42,.24)}.grab{width:42px;height:5px;border-radius:999px;background:var(--line-strong);margin:0 auto 14px}.sheet-head{display:flex;align-items:center;gap:12px;margin-bottom:14px}.sheet-head h3{font-size:1.05rem;margin:0;margin-right:auto}.close{width:34px;height:34px;border:0;border-radius:11px;background:var(--surface-2);font-size:1rem}.type-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}.type{border:1px solid var(--line);background:#fff;border-radius:17px;padding:15px;text-align:left}.type-icon{width:37px;height:37px;border-radius:12px;display:grid;place-items:center;margin-bottom:12px;font-weight:900}.type.rem .type-icon{background:var(--amber-soft);color:var(--amber)}.type.todo .type-icon{background:var(--green-soft);color:var(--green)}.type strong{display:block;font-size:.86rem}.type span{font-size:.7rem;color:var(--ink-faint);display:block;margin-top:3px;line-height:1.35}
+.form{display:grid;gap:11px}.field label{display:block;font-size:.71rem;font-weight:800;color:var(--ink-soft);margin-bottom:5px}.field input,.field textarea,.field select{width:100%;border:1px solid var(--line);background:var(--surface-2);border-radius:13px;padding:10px 11px;outline:none}.field textarea{min-height:72px;resize:vertical}.twocol{display:grid;grid-template-columns:1fr 1fr;gap:9px}.audience{display:grid;grid-template-columns:1fr 1fr;gap:9px}.audience input{position:absolute;opacity:0;pointer-events:none}.audience label{display:flex;align-items:center;gap:9px;border:1px solid var(--line);background:var(--surface-2);border-radius:13px;padding:10px 11px;font-size:.76rem;font-weight:800;cursor:pointer}.audience label:before{content:'';width:12px;height:12px;border-radius:50%;flex:0 0 12px}.audience label[for=remPersonal]:before{background:#3f51b5}.audience label[for=remCommon]:before{background:#039be5}.audience input:checked+label{border-color:var(--blue);box-shadow:0 0 0 2px rgba(55,92,244,.10);background:#fff}.save{width:100%;border:0;background:var(--blue);color:#fff;border-radius:14px;padding:11px 14px;font-weight:850;margin-top:2px}.back{border:0;background:transparent;color:var(--blue);font-size:.75rem;font-weight:850;padding:0 0 8px}.help{font-size:.69rem;color:var(--ink-faint);line-height:1.5}.calendar-list{display:grid;gap:8px}.cal{width:100%;border:1px solid var(--line);background:#fff;border-radius:14px;padding:12px;text-align:left}.cal:hover{background:var(--surface-2);border-color:var(--line-strong)}.cal strong{display:block;font-size:.84rem}.cal span{display:block;color:var(--ink-faint);font-size:.68rem;margin-top:3px}.loader{padding:24px;text-align:center;color:var(--ink-faint);font-size:.76rem}.spin{display:inline-block;width:14px;height:14px;border:2px solid var(--line);border-top-color:var(--blue);border-radius:50%;animation:spin .7s linear infinite;vertical-align:-2px;margin-right:6px}@keyframes spin{to{transform:rotate(360deg)}}
+.toast{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);z-index:120;background:#172033;color:#fff;border-radius:13px;padding:9px 12px;font-size:.72rem;font-weight:750;box-shadow:var(--shadow);max-width:min(90vw,540px);text-align:center}
+@media(max-width:760px){.grid{grid-template-columns:1fr}.panel{min-height:290px}.status{display:none}.hero{padding:22px}.hero h2{font-size:1.35rem}.type-grid{grid-template-columns:1fr}.twocol{grid-template-columns:1fr 1fr}}
+@media(max-width:460px){.shell{padding-left:12px;padding-right:12px}.topbar .btn.ghost{display:none}.brand h1{font-size:1.02rem}.finance{padding:13px}.hero-actions .btn{flex:1}.item{grid-template-columns:30px minmax(0,1fr) auto}.when{max-width:86px;overflow:hidden;text-overflow:ellipsis}}
+@media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+
+/* ---------- login globale -------------------------------------------------- */
+.login-gate{
+  position:fixed;inset:0;z-index:1000;
+  display:grid;place-items:center;
+  background:#5B7CFA;
+}
+.login-gate.hidden{display:none!important}
+.login-gate button{
+  border:0;background:#fff;color:#4E6FEF;
+  min-width:140px;padding:13px 26px;border-radius:14px;
+  font-size:1rem;font-weight:850;
+  box-shadow:0 10px 28px rgba(23,32,51,.16);
+}
+.login-gate button:disabled{opacity:.65;cursor:default}
+.app-locked{visibility:hidden}
+
+</style>
+</head>
+<body>
+<div class="login-gate" id="loginGate">
+  <button type="button" id="globalLoginBtn">Login</button>
+</div>
+<div class="shell app-locked" id="appShell">
+  <header class="topbar">
+    <div class="brand"><div class="logo">G</div><div><div class="eyebrow">Personal OS</div><h1>Dashboard personale</h1></div></div>
+    <div class="status" id="status"><span class="status-dot"></span><span id="statusText">Non connesso</span></div>
+<button class="btn primary" id="loginBtn">Accedi con Google</button>
+    <button class="btn hidden" id="logoutBtn">Esci</button>
+  </header>
+
+  <section class="hero">
+    <h2>Quello che richiede la tua attenzione.</h2>
+    <p>Reminder dal calendario condiviso e To do dal Google Sheet dedicato. Finance resta una sotto-app indipendente.</p>
+    <div class="hero-actions">
+      <button class="btn primary" id="addBtn">＋ Aggiungi</button>
+      <button class="btn" id="refreshBtn">↻ Aggiorna</button>
+    </div>
+  </section>
+
+  <div id="setupNotice" class="notice hidden"></div>
+
+  <section class="grid">
+    <article class="panel">
+      <div class="panel-head">
+        <div class="panel-icon rem">◷</div>
+        <div class="panel-title"><h2>Reminder</h2><p>Google Calendar condiviso · spuntare li nasconde solo qui</p></div>
+        <span class="count" id="remCount">0</span>
+      </div>
+      <div class="list" id="remList"><div class="empty"><div class="empty-glyph">◷</div>Accedi per caricare i reminder.</div></div>
+    </article>
+
+    <article class="panel">
+      <div class="panel-head">
+        <div class="panel-icon todo">✓</div>
+        <div class="panel-title"><h2>To do</h2><p>Google Sheet · spuntare elimina la riga dal foglio</p></div>
+        <span class="count" id="todoCount">0</span>
+      </div>
+      <div class="list" id="todoList"><div class="empty"><div class="empty-glyph">✓</div>Accedi per caricare i To do.</div></div>
+    </article>
+  </section>
+
+  <section class="finance">
+    <div class="finance-icon">€</div>
+    <div class="finance-copy"><h3>Finance</h3><p>La tua dashboard di finanza personale esistente, invariata.</p></div>
+    <button class="finance-open" id="openFinance">Apri →</button>
+  </section>
+</div>
+
+<div class="overlay hidden" id="quickOverlay" role="dialog" aria-modal="true">
+  <div class="sheet">
+    <div class="grab"></div>
+    <div class="sheet-head"><h3 id="quickTitle">Cosa vuoi aggiungere?</h3><button class="close" id="closeQuick">×</button></div>
+    <div id="typePicker" class="type-grid">
+      <button class="type rem" data-type="reminder"><span class="type-icon">◷</span><strong>Reminder</strong><span>Scrive un evento nel calendario condiviso.</span></button>
+      <button class="type todo" data-type="todo"><span class="type-icon">✓</span><strong>To do</strong><span>Scrive una riga nel foglio ToDo.</span></button>
+    </div>
+    <div id="reminderFormWrap" class="hidden">
+      <button class="back" data-back>← Cambia tipo</button>
+      <form class="form" id="reminderForm">
+        <div class="field"><label>Reminder</label><input id="remTitle" required placeholder="Es. chiamare l'elettrotecnico"></div>
+        <div class="twocol">
+          <div class="field"><label>Data</label><input id="remDate" type="date" required></div>
+          <div class="field"><label>Ora</label><input id="remTime" type="time" required></div>
+        </div>
+        <div class="field">
+          <label>Tipo</label>
+          <div class="audience">
+            <input type="radio" name="remAudience" id="remPersonal" value="personal" checked><label for="remPersonal">Personale · Mirtillo</label>
+            <input type="radio" name="remAudience" id="remCommon" value="common"><label for="remCommon">Comune · Pavone</label>
+          </div>
+        </div>
+        <div class="field"><label>Nota</label><textarea id="remNote" placeholder="Opzionale"></textarea></div>
+        <div class="help">L'evento viene creato nel calendario condiviso selezionato. Quando lo spunti nella dashboard resta nel calendario.</div>
+        <button class="save" type="submit">Salva nel calendario</button>
+      </form>
+    </div>
+    <div id="todoFormWrap" class="hidden">
+      <button class="back" data-back>← Cambia tipo</button>
+      <form class="form" id="todoForm">
+        <div class="field"><label>To do</label><input id="todoTitle" required placeholder="Es. inviare documenti alla banca"></div>
+        <div class="field"><label>Nota</label><textarea id="todoNote" placeholder="Opzionale"></textarea></div>
+        <div class="help">Il To do viene salvato nel foglio <strong>ToDo</strong> del Google Sheet configurato.</div>
+        <button class="save" type="submit">Salva To do</button>
+      </form>
+    </div>
+  </div>
+</div>
+
+<div class="toast hidden" id="toast"></div>
+
+<script>
+(function(){
+'use strict';
+
+/* ==========================================================================
+   CONFIGURAZIONE
+   - Finance resta totalmente separata e NON usa questa configurazione.
+   - Il client OAuth è lo stesso; i To do usano uno Spreadsheet dedicato.
+   - La dashboard richiede però scope di scrittura per Calendar e Sheets.
+   - Gli account autorizzati NON sono nel codice: vengono gestiti nel progetto OAuth Google Cloud.
+   ========================================================================== */
+var CONFIG = {
+clientId: '177628124658-c9km173ch1v1ph1akoqvmapjgpo1pt0s.apps.googleusercontent.com',
+  spreadsheetId: '1E6Lod_d0D0wOv3mrIErpSt9t5ntexGEnW-Ka0e4RXY0',
+  todoSheet: 'ToDo',
+  doneSheet: 'ReminderDone',
+  calendarId: 'f63j9gnmsr08t755hj5s9b8ulo@group.calendar.google.com',
+  scope: [
+    'https://www.googleapis.com/auth/calendar.events',
+    'https://www.googleapis.com/auth/spreadsheets'
+  ].join(' ')
+};
+
+var State = { token:null, tokenClient:null, calendarId:CONFIG.calendarId, metadata:null, loading:false };
+var $=function(id){return document.getElementById(id);};
+
+function toast(msg){var el=$('toast');el.textContent=msg;el.classList.remove('hidden');clearTimeout(toast._t);toast._t=setTimeout(function(){el.classList.add('hidden');},2800);}
+function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
+function isoDate(d){return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
+function todayDefaults(){var d=new Date();$('remDate').value=isoDate(d);var h=d.getHours()+1;$('remTime').value=String(h%24).padStart(2,'0')+':00';}
+function status(text,online){$('statusText').textContent=text;$('status').classList.toggle('online',!!online);}
+function setLoggedIn(on){$('loginBtn').classList.toggle('hidden',on);$('logoutBtn').classList.toggle('hidden',!on);status(on?'Connesso':'Non connesso',on);}
+function showGate(){
+  $('loginGate').classList.remove('hidden');
+  $('appShell').classList.add('app-locked');
+}
+function hideGate(){
+  $('loginGate').classList.add('hidden');
+  $('appShell').classList.remove('app-locked');
+}
+
+function waitGoogle(){return new Promise(function(resolve,reject){var n=0;(function poll(){if(window.google&&google.accounts&&google.accounts.oauth2)return resolve();if(++n>100)return reject(new Error('Google Identity Services non disponibile.'));setTimeout(poll,80);})();});}
+function initAuth(){return waitGoogle().then(function(){State.tokenClient=google.accounts.oauth2.initTokenClient({client_id:CONFIG.clientId,scope:CONFIG.scope,callback:function(resp){if(resp.error){toast('Accesso Google non riuscito.');showGate();return;}State.token=resp.access_token;hideGate();setLoggedIn(true);afterLogin();}});});}
+function login(){if(!State.tokenClient){toast('Servizio Google non ancora pronto.');return;}State.tokenClient.requestAccessToken({prompt:'select_account'});}
+function logout(){if(State.token&&window.google&&google.accounts&&google.accounts.oauth2){google.accounts.oauth2.revoke(State.token,function(){});}State.token=null;setLoggedIn(false);renderEmpty('Accedi per caricare i dati.');showGate();}
+
+function api(url,options){options=options||{};options.headers=Object.assign({'Authorization':'Bearer '+State.token,'Content-Type':'application/json'},options.headers||{});return fetch(url,options).then(function(r){if(r.status===401){State.token=null;setLoggedIn(false);throw new Error('Sessione Google scaduta: accedi di nuovo.');}return r.text().then(function(t){var body=t?JSON.parse(t):{};if(!r.ok)throw new Error((body.error&&body.error.message)||('Errore HTTP '+r.status));return body;});});}
+
+/* ---------- Calendar ------------------------------------------------------ */
+function eventDate(ev){var raw=ev.start&&(ev.start.dateTime||ev.start.date);return raw?new Date(raw):null;}
+function eventWhen(ev){var d=eventDate(ev);if(!d)return '';var now=new Date();var same=isoDate(d)===isoDate(now);if(ev.start.date&&!ev.start.dateTime)return same?'Oggi':d.toLocaleDateString('it-IT',{day:'2-digit',month:'short'});return same?d.toLocaleTimeString('it-IT',{hour:'2-digit',minute:'2-digit'}):d.toLocaleDateString('it-IT',{day:'2-digit',month:'short'})+' · '+d.toLocaleTimeString('it-IT',{hour:'2-digit',minute:'2-digit'});}
+function eventClass(ev){var d=eventDate(ev);if(!d)return '';var now=new Date();if(isoDate(d)===isoDate(now))return 'today';var diff=(d-now)/86400000;return diff<7?'soon':'';}
+function listCalendarEvents(){var now=new Date();var past=new Date(now.getTime()-30*86400000);var future=new Date(now.getTime()+365*86400000);var q='?singleEvents=true&orderBy=startTime&showDeleted=false&maxResults=250&timeMin='+encodeURIComponent(past.toISOString())+'&timeMax='+encodeURIComponent(future.toISOString());return api('https://www.googleapis.com/calendar/v3/calendars/'+encodeURIComponent(State.calendarId)+'/events'+q).then(function(d){return d.items||[];});}
+function createReminder(title,date,time,note,audience){var start=new Date(date+'T'+time+':00');var end=new Date(start.getTime()+30*60000);var colorId=audience==='common'?'7':'9';var body={summary:title,description:note||'',colorId:colorId,start:{dateTime:start.toISOString()},end:{dateTime:end.toISOString()},extendedProperties:{private:{personalOS:'reminder',personalOSScope:audience||'personal'}}};return api('https://www.googleapis.com/calendar/v3/calendars/'+encodeURIComponent(State.calendarId)+'/events',{method:'POST',body:JSON.stringify(body)});}
+
+/* ---------- Sheets -------------------------------------------------------- */
+var SHEETS='https://sheets.googleapis.com/v4/spreadsheets/';
+function sheetMeta(){return api(SHEETS+encodeURIComponent(CONFIG.spreadsheetId)+'?fields=sheets.properties(sheetId,title,index)').then(function(d){State.metadata=d;return d;});}
+function findSheet(meta,title){var s=(meta.sheets||[]).find(function(x){return x.properties.title===title;});return s?s.properties:null;}
+function addSheet(title){return api(SHEETS+encodeURIComponent(CONFIG.spreadsheetId)+':batchUpdate',{method:'POST',body:JSON.stringify({requests:[{addSheet:{properties:{title:title}}}]})});}
+function getValues(range){return api(SHEETS+encodeURIComponent(CONFIG.spreadsheetId)+'/values/'+encodeURIComponent(range));}
+function updateValues(range,values){return api(SHEETS+encodeURIComponent(CONFIG.spreadsheetId)+'/values/'+encodeURIComponent(range)+'?valueInputOption=RAW',{method:'PUT',body:JSON.stringify({range:range,majorDimension:'ROWS',values:values})});}
+function appendValues(range,values){return api(SHEETS+encodeURIComponent(CONFIG.spreadsheetId)+'/values/'+encodeURIComponent(range)+':append?valueInputOption=RAW&insertDataOption=INSERT_ROWS',{method:'POST',body:JSON.stringify({values:values})});}
+function deleteRow(sheetId,rowNumber){return api(SHEETS+encodeURIComponent(CONFIG.spreadsheetId)+':batchUpdate',{method:'POST',body:JSON.stringify({requests:[{deleteDimension:{range:{sheetId:sheetId,dimension:'ROWS',startIndex:rowNumber-1,endIndex:rowNumber}}}]})});}
+function ensureDataSheets(){return sheetMeta().then(function(meta){var jobs=[];if(!findSheet(meta,CONFIG.todoSheet))jobs.push(addSheet(CONFIG.todoSheet));if(!findSheet(meta,CONFIG.doneSheet))jobs.push(addSheet(CONFIG.doneSheet));return Promise.all(jobs);}).then(function(){return sheetMeta();}).then(function(){return Promise.all([ensureHeader(CONFIG.todoSheet,['ID','CreatedAt','Title','Note']),ensureHeader(CONFIG.doneSheet,['CalendarEventId','CompletedAt'])]);});}
+function ensureHeader(sheet,header){return getValues(sheet+'!A1:D1').then(function(d){if((d.values||[]).length)return null;return updateValues(sheet+'!A1:'+String.fromCharCode(64+header.length)+'1',[header]);});}
+function loadTodos(){return getValues(CONFIG.todoSheet+'!A2:D').then(function(d){return (d.values||[]).map(function(r,i){return {id:r[0]||'',createdAt:r[1]||'',title:r[2]||'',note:r[3]||'',row:i+2};}).filter(function(x){return x.title;});});}
+function loadDoneIds(){return getValues(CONFIG.doneSheet+'!A2:B').then(function(d){var set={};(d.values||[]).forEach(function(r){if(r[0])set[r[0]]=true;});return set;});}
+function createTodo(title,note){var id='td_'+Date.now()+'_'+Math.random().toString(36).slice(2,8);return appendValues(CONFIG.todoSheet+'!A:D',[[id,new Date().toISOString(),title,note||'']]);}
+function completeReminder(eventId){return appendValues(CONFIG.doneSheet+'!A:B',[[eventId,new Date().toISOString()]]);}
+
+/* ---------- Rendering ----------------------------------------------------- */
+function renderEmpty(msg){$('remList').innerHTML='<div class="empty"><div class="empty-glyph">◷</div>'+esc(msg)+'</div>';$('todoList').innerHTML='<div class="empty"><div class="empty-glyph">✓</div>'+esc(msg)+'</div>';$('remCount').textContent='0';$('todoCount').textContent='0';}
+function renderReminders(items){$('remCount').textContent=String(items.length);if(!items.length){$('remList').innerHTML='<div class="empty"><div class="empty-glyph">◷</div>Nessun reminder aperto.</div>';return;}$('remList').innerHTML=items.map(function(ev){var d=eventDate(ev);var sub=(d?d.toLocaleDateString('it-IT',{weekday:'short',day:'2-digit',month:'long'}):'')+(ev.description?' · '+ev.description:'');return '<div class="item"><button class="check" data-remdone="'+esc(ev.id)+'" aria-label="Segna fatto"></button><div class="item-main"><div class="item-title">'+esc(ev.summary||'(Senza titolo)')+'</div><div class="item-sub">'+esc(sub)+'</div></div><span class="when '+eventClass(ev)+'">'+esc(eventWhen(ev))+'</span></div>';}).join('');Array.prototype.forEach.call($('remList').querySelectorAll('[data-remdone]'),function(b){b.addEventListener('click',function(){var id=b.getAttribute('data-remdone');b.classList.add('busy');b.disabled=true;completeReminder(id).then(function(){b.closest('.item').remove();$('remCount').textContent=String(Math.max(0,+$('remCount').textContent-1));toast('Reminder completato. L\'evento resta in Calendar.');}).catch(function(e){b.classList.remove('busy');b.disabled=false;toast(e.message);});});});}
+function renderTodos(items){$('todoCount').textContent=String(items.length);if(!items.length){$('todoList').innerHTML='<div class="empty"><div class="empty-glyph">✓</div>Nessun To do aperto.</div>';return;}$('todoList').innerHTML=items.map(function(td){return '<div class="item"><button class="check" data-tododone="'+td.row+'" aria-label="Segna fatto"></button><div class="item-main"><div class="item-title">'+esc(td.title)+'</div><div class="item-sub">'+esc(td.note||'Creato '+(td.createdAt?new Date(td.createdAt).toLocaleDateString('it-IT'):'') )+'</div></div><span class="when">To do</span></div>';}).join('');Array.prototype.forEach.call($('todoList').querySelectorAll('[data-tododone]'),function(b){b.addEventListener('click',function(){var row=+b.getAttribute('data-tododone');var prop=findSheet(State.metadata,CONFIG.todoSheet);if(!prop){toast('Foglio ToDo non trovato.');return;}b.classList.add('busy');b.disabled=true;deleteRow(prop.sheetId,row).then(function(){toast('To do eliminato dal Google Sheet.');return refreshAll();}).catch(function(e){b.classList.remove('busy');b.disabled=false;toast(e.message);});});});}
+function refreshAll(){
+  if(!State.token){renderEmpty('Accedi per caricare i dati.');return Promise.resolve();}
+  if(State.loading)return Promise.resolve();
+  State.loading=true;
+  status('Aggiornamento…',true);
+  $('setupNotice').classList.add('hidden');
+  return ensureDataSheets()
+    .then(function(){return Promise.all([listCalendarEvents(),loadDoneIds(),loadTodos()]);})
+    .then(function(all){
+      var events=all[0],done=all[1],todos=all[2];
+      var visible=events.filter(function(e){return e.status!=='cancelled'&&!done[e.id];});
+      renderReminders(visible);
+      renderTodos(todos);
+      status('Connesso',true);
+    })
+    .catch(function(e){
+      renderEmpty('Errore di caricamento.');
+      toast(e.message);
+      $('setupNotice').innerHTML='<strong>Configurazione:</strong> '+esc(e.message);
+      $('setupNotice').classList.remove('hidden');
+    })
+    .finally(function(){State.loading=false;});
+}
+function afterLogin(){refreshAll();}
+
+/* ---------- Quick add ----------------------------------------------------- */
+function openQuick(){$('quickOverlay').classList.remove('hidden');document.body.style.overflow='hidden';resetQuick();}
+function closeQuick(){$('quickOverlay').classList.add('hidden');document.body.style.overflow='';}
+function resetQuick(){$('typePicker').classList.remove('hidden');$('reminderFormWrap').classList.add('hidden');$('todoFormWrap').classList.add('hidden');$('quickTitle').textContent='Cosa vuoi aggiungere?';$('reminderForm').reset();$('todoForm').reset();todayDefaults();}
+function selectType(t){if(!State.token){closeQuick();login();return;}$('typePicker').classList.add('hidden');$('reminderFormWrap').classList.toggle('hidden',t!=='reminder');$('todoFormWrap').classList.toggle('hidden',t!=='todo');$('quickTitle').textContent=t==='reminder'?'Nuovo Reminder':'Nuovo To do';setTimeout(function(){(t==='reminder'?$('remTitle'):$('todoTitle')).focus();},30);}
+
+$('addBtn').addEventListener('click',openQuick);$('closeQuick').addEventListener('click',closeQuick);$('quickOverlay').addEventListener('click',function(e){if(e.target===$('quickOverlay'))closeQuick();});Array.prototype.forEach.call(document.querySelectorAll('[data-back]'),function(b){b.addEventListener('click',resetQuick);});Array.prototype.forEach.call(document.querySelectorAll('[data-type]'),function(b){b.addEventListener('click',function(){selectType(b.getAttribute('data-type'));});});
+$('reminderForm').addEventListener('submit',function(e){e.preventDefault();var title=$('remTitle').value.trim();if(!title)return;var btn=e.submitter;btn.disabled=true;btn.innerHTML='<span class="spin"></span>Salvataggio…';createReminder(title,$('remDate').value,$('remTime').value,$('remNote').value.trim(),document.querySelector('input[name="remAudience"]:checked').value).then(function(){closeQuick();toast('Reminder salvato nel calendario condiviso.');return refreshAll();}).catch(function(err){toast(err.message);}).finally(function(){btn.disabled=false;btn.textContent='Salva nel calendario';});});
+$('todoForm').addEventListener('submit',function(e){e.preventDefault();var title=$('todoTitle').value.trim();if(!title)return;var btn=e.submitter;btn.disabled=true;btn.innerHTML='<span class="spin"></span>Salvataggio…';ensureDataSheets().then(function(){return createTodo(title,$('todoNote').value.trim());}).then(function(){closeQuick();toast('To do salvato nel Google Sheet.');return refreshAll();}).catch(function(err){toast(err.message);}).finally(function(){btn.disabled=false;btn.textContent='Salva To do';});});
+
+/* ---------- UI events ----------------------------------------------------- */
+$('globalLoginBtn').addEventListener('click',login);$('loginBtn').addEventListener('click',login);$('logoutBtn').addEventListener('click',logout);$('refreshBtn').addEventListener('click',function(){if(State.token)refreshAll();else login();});$('openFinance').addEventListener('click',function(){window.location.href='finance.html';});document.addEventListener('keydown',function(e){if(e.key==='Escape')closeQuick();});
+
+showGate();renderEmpty('Accedi per caricare i dati.');todayDefaults();initAuth().catch(function(e){toast(e.message);});
+})();
+</script>
+</body>
+</html>

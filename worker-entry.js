@@ -5,6 +5,10 @@ import {
   injectFinanceSessionBridge,
   isFinancePath
 } from './finance-auth.js';
+import {
+  injectDashboardDefaults,
+  isDashboardPath
+} from './dashboard-defaults.js';
 
 export default {
   async fetch(request, env, ctx) {
@@ -42,8 +46,8 @@ export default {
     }
 
     const response = await appWorker.fetch(request, env, ctx);
-    return isFinancePath(url.pathname)
-      ? injectFinanceSessionBridge(response)
-      : response;
+    if (isFinancePath(url.pathname)) return injectFinanceSessionBridge(response);
+    if (isDashboardPath(url.pathname)) return injectDashboardDefaults(response);
+    return response;
   }
 };

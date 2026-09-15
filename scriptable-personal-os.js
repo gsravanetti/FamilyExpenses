@@ -51,16 +51,10 @@ if (!config.runsInWidget) {
 
 Script.complete();
 
-
-// ============================================================
-// TOKEN
-// ============================================================
-
 async function getToken() {
   if (Keychain.contains(CONFIG.tokenKey)) {
     return Keychain.get(CONFIG.tokenKey);
   }
-
   if (config.runsInWidget) return null;
 
   const alert = new Alert();
@@ -80,15 +74,8 @@ async function getToken() {
   return value;
 }
 
-
-// ============================================================
-// API
-// ============================================================
-
 async function loadData(token) {
-  if (!token) {
-    return { source: 'error', error: 'Token widget mancante.' };
-  }
+  if (!token) return { source: 'error', error: 'Token widget mancante.' };
 
   try {
     const req = new Request(CONFIG.apiUrl);
@@ -100,42 +87,25 @@ async function loadData(token) {
     };
 
     const data = await req.loadJSON();
-    const status = req.response
-      ? Number(req.response.statusCode || 0)
-      : 0;
+    const status = req.response ? Number(req.response.statusCode || 0) : 0;
 
     if (status && (status < 200 || status >= 300)) {
-      throw new Error(
-        `HTTP ${status}: ${data && data.error ? data.error : 'errore API'}`
-      );
+      throw new Error(`HTTP ${status}: ${data && data.error ? data.error : 'errore API'}`);
     }
-
     if (!isValidPayload(data)) {
-      throw new Error(
-        data && data.error
-          ? data.error
-          : 'Risposta API incompleta o non valida.'
-      );
+      throw new Error(data && data.error ? data.error : 'Risposta API incompleta o non valida.');
     }
 
     saveCache(data);
     return { source: 'live', data };
   } catch (error) {
-    const message = String(
-      error && error.message ? error.message : error
-    );
-
+    const message = String(error && error.message ? error.message : error);
     console.log('Widget API error: ' + message);
 
     const cached = loadCache();
     if (isValidPayload(cached)) {
-      return {
-        source: 'cache',
-        data: cached,
-        error: message
-      };
+      return { source: 'cache', data: cached, error: message };
     }
-
     return { source: 'error', error: message };
   }
 }
@@ -152,17 +122,11 @@ function isValidPayload(data) {
   );
 }
 
-
-// ============================================================
-// WIDGET
-// ============================================================
-
 function buildWidget(mode, result) {
   const widget = new ListWidget();
   const family = config.widgetFamily || 'medium';
   const compact = family === 'small';
 
-  // Più spazio utile: header quasi attaccato al bordo superiore e padding ridotti.
   widget.setPadding(
     compact ? 2 : 4,
     compact ? 6 : 8,
@@ -177,15 +141,11 @@ function buildWidget(mode, result) {
   );
 
   addHeader(widget, mode);
-
-  widget.addSpacer(
-    mode === 'finance'
-      ? 5
-      : 1
-  );
+  widget.addSpacer(mode === 'finance' ? 5 : 1);
 
   if (result.source === 'error') {
     buildError(widget, result.error);
+    widget.addSpacer();
     widget.url = CONFIG.baseUrl;
     return widget;
   }
@@ -194,24 +154,21 @@ function buildWidget(mode, result) {
 
   if (mode === 'reminder') {
     buildReminder(widget, data.reminder || {});
+    // Spacer flessibile in fondo: assorbe tutto lo spazio residuo e tiene la timeline in alto.
+    widget.addSpacer();
     widget.url = compact ? makeRefreshUrl(mode) : CONFIG.baseUrl;
   } else if (mode === 'finance') {
     buildFinance(widget, data.finance || {});
     widget.url = CONFIG.financeUrl;
   } else {
     buildTodo(widget, data.todo || {});
+    // Spacer flessibile in fondo: i task restano agganciati in alto, senza altezza fissa per riga.
+    widget.addSpacer();
     widget.url = compact ? makeRefreshUrl(mode) : CONFIG.baseUrl;
   }
 
   return widget;
 }
-
-
-// ============================================================
-// HEADER
-// TASK / REMINDER: solo Refresh, centrato e più in alto possibile.
-// FINANCE: mantiene il titolo perché non ha il pulsante Refresh.
-// ============================================================
 
 function addHeader(widget, mode) {
   const compact = (config.widgetFamily || 'medium') === 'small';
@@ -231,16 +188,8 @@ function addHeader(widget, mode) {
   title.font = Font.semiboldSystemFont(compact ? 12 : 13);
   title.lineLimit = 1;
   title.minimumScaleFactor = 1;
-  title.textColor = Color.dynamic(
-    new Color(COLORS.ink),
-    Color.white()
-  );
+  title.textColor = Color.dynamic(new Color(COLORS.ink), Color.white());
 }
-
-
-// ============================================================
-// REFRESH BUTTON
-// ============================================================
 
 function addRefreshButton(row, mode) {
   const compact = (config.widgetFamily || 'medium') === 'small';
@@ -250,26 +199,15 @@ function addRefreshButton(row, mode) {
   button.centerAlignContent();
   button.backgroundColor = new Color(COLORS.blue);
   button.cornerRadius = 7;
-  button.size = new Size(
-    compact ? 76 : 84,
-    compact ? 20 : 22
-  );
-  button.setPadding(
-    2,
-    compact ? 5 : 6,
-    2,
-    compact ? 5 : 6
-  );
+  button.size = new Size(compact ? 76 : 84, compact ? 20 : 22);
+  button.setPadding(2, compact ? 5 : 6, 2, compact ? 5 : 6);
   button.url = makeRefreshUrl(mode);
 
   const symbol = SFSymbol.named('arrow.clockwise');
   symbol.applyFont(Font.semiboldSystemFont(compact ? 9 : 10));
 
   const image = button.addImage(symbol.image);
-  image.imageSize = new Size(
-    compact ? 9 : 10,
-    compact ? 9 : 10
-  );
+  image.imageSize = new Size(compact ? 9 : 10, compact ? 9 : 10);
   image.tintColor = Color.white();
 
   button.addSpacer(3);
@@ -290,68 +228,39 @@ function makeRefreshUrl(mode) {
   );
 }
 
-
-// ============================================================
-// ERROR
-// ============================================================
-
 function buildError(widget, message) {
   const title = widget.addText('Sincronizzazione non riuscita');
   title.font = Font.boldSystemFont(16);
-  title.textColor = Color.dynamic(
-    new Color(COLORS.ink),
-    Color.white()
-  );
+  title.textColor = Color.dynamic(new Color(COLORS.ink), Color.white());
 
   widget.addSpacer(5);
 
-  const body = widget.addText(
-    String(message || 'Errore sconosciuto')
-  );
+  const body = widget.addText(String(message || 'Errore sconosciuto'));
   body.font = Font.systemFont(11);
   body.lineLimit = 5;
   body.minimumScaleFactor = 1;
-  body.textColor = Color.dynamic(
-    new Color(COLORS.inkSoft),
-    new Color('#AAAAAA')
-  );
+  body.textColor = Color.dynamic(new Color(COLORS.inkSoft), new Color('#AAAAAA'));
 }
-
-
-// ============================================================
-// QUANTE RIGHE MOSTRARE
-// ============================================================
 
 function maxVisibleRows(kind) {
   const family = config.widgetFamily || 'medium';
-
   if (family === 'large') return 9;
   if (family === 'small') return 5;
   return 5;
 }
-
-
-// ============================================================
-// TASK
-// ============================================================
 
 function buildTodo(widget, todo) {
   const all = Array.isArray(todo.items) ? todo.items : [];
   const limit = maxVisibleRows('todo');
   const items = all.slice(0, limit);
 
-  if (!items.length) {
-    return addEmpty(widget, 'Nessun task aperto');
-  }
+  if (!items.length) return addEmpty(widget, 'Nessun task aperto');
 
   items.forEach((item, index) => {
     addTaskRow(widget, item);
-    if (index < items.length - 1) {
-      widget.addSpacer(2);
-    }
+    if (index < items.length - 1) widget.addSpacer(2);
   });
 
-  // Nel widget piccolo privilegiamo un task reale rispetto alla riga “+ N altri”.
   if ((config.widgetFamily || 'medium') !== 'small') {
     addMoreRow(widget, all.length - items.length);
   }
@@ -364,13 +273,9 @@ function addTaskRow(widget, item) {
   row.layoutHorizontally();
   row.topAlignContent();
 
-  // Nessuna altezza fissa: una riga usa solo lo spazio che serve;
-  // un titolo lungo può crescere fino a due righe.
+  // Nessuna altezza fissa: 1 riga usa una riga, 2 righe usano due righe.
   const mark = row.addStack();
-  mark.size = new Size(
-    compact ? 15 : 16,
-    compact ? 15 : 16
-  );
+  mark.size = new Size(compact ? 15 : 16, compact ? 15 : 16);
   mark.cornerRadius = 5;
   mark.backgroundColor = new Color(COLORS.blue);
   mark.centerAlignContent();
@@ -388,39 +293,20 @@ function addTaskRow(widget, item) {
   title.font = Font.semiboldSystemFont(compact ? 11.5 : 12);
   title.lineLimit = 2;
   title.minimumScaleFactor = 1;
-  title.textColor = Color.dynamic(
-    new Color(COLORS.ink),
-    Color.white()
-  );
+  title.textColor = Color.dynamic(new Color(COLORS.ink), Color.white());
 }
-
-
-// ============================================================
-// REMINDER
-// ============================================================
 
 function buildReminder(widget, reminder) {
   const all = Array.isArray(reminder.items) ? reminder.items : [];
   const limit = maxVisibleRows('reminder');
   const items = all.slice(0, limit);
 
-  if (!items.length) {
-    return addEmpty(widget, 'Nessun reminder aperto');
-  }
+  if (!items.length) return addEmpty(widget, 'Nessun reminder aperto');
 
   items.forEach((item, index) => {
-    addTimelineRow(
-      widget,
-      item,
-      index === items.length - 1
-    );
+    addTimelineRow(widget, item, index === items.length - 1);
   });
 }
-
-
-// ============================================================
-// TIMELINE
-// ============================================================
 
 function addTimelineRow(widget, item, isLast) {
   const compact = (config.widgetFamily || 'medium') === 'small';
@@ -433,10 +319,7 @@ function addTimelineRow(widget, item, isLast) {
   const rail = row.addStack();
   rail.layoutVertically();
   rail.centerAlignContent();
-  rail.size = new Size(
-    compact ? 10 : 12,
-    compact ? 27 : 29
-  );
+  rail.size = new Size(compact ? 10 : 12, compact ? 27 : 29);
 
   const dot = rail.addText('●');
   dot.font = Font.systemFont(compact ? 7.5 : 8.5);
@@ -448,10 +331,7 @@ function addTimelineRow(widget, item, isLast) {
     lineRow.addSpacer(compact ? 4 : 5);
 
     const line = lineRow.addStack();
-    line.size = new Size(
-      1,
-      compact ? 15 : 17
-    );
+    line.size = new Size(1, compact ? 15 : 17);
     line.backgroundColor = Color.dynamic(
       new Color(COLORS.line),
       new Color('#4B5563')
@@ -466,16 +346,8 @@ function addTimelineRow(widget, item, isLast) {
   when.layoutVertically();
   when.backgroundColor = reminderAccent(item);
   when.cornerRadius = compact ? 5 : 6;
-  when.setPadding(
-    1,
-    compact ? 3 : 4,
-    1,
-    compact ? 3 : 4
-  );
-  when.size = new Size(
-    compact ? 43 : 51,
-    compact ? 24 : 28
-  );
+  when.setPadding(1, compact ? 3 : 4, 1, compact ? 3 : 4);
+  when.size = new Size(compact ? 43 : 51, compact ? 24 : 28);
 
   const date = when.addText(reminderDate(item));
   date.font = Font.semiboldSystemFont(compact ? 9.7 : 10.5);
@@ -484,7 +356,6 @@ function addTimelineRow(widget, item, isLast) {
   date.textColor = reminderTextColor(item);
 
   const timeText = reminderTime(item);
-
   if (timeText) {
     const time = when.addText(timeText);
     time.font = Font.systemFont(compact ? 8.2 : 9);
@@ -499,16 +370,8 @@ function addTimelineRow(widget, item, isLast) {
   title.font = Font.semiboldSystemFont(compact ? 10.4 : 11.5);
   title.lineLimit = 2;
   title.minimumScaleFactor = 1;
-  title.textColor = Color.dynamic(
-    new Color(COLORS.ink),
-    Color.white()
-  );
+  title.textColor = Color.dynamic(new Color(COLORS.ink), Color.white());
 }
-
-
-// ============================================================
-// + N ALTRI — TASK
-// ============================================================
 
 function addMoreRow(widget, remaining) {
   if (remaining <= 0) return;
@@ -523,11 +386,6 @@ function addMoreRow(widget, remaining) {
   more.textColor = new Color(COLORS.blue);
 }
 
-
-// ============================================================
-// REMINDER DATE / TIME
-// ============================================================
-
 function reminderDate(item) {
   if (!item || !item.start) return '—';
 
@@ -541,10 +399,7 @@ function reminderDate(item) {
   if (sameCalendarDay(d, today)) return 'Oggi';
   if (sameCalendarDay(d, tomorrow)) return 'Domani';
 
-  return d.toLocaleDateString('it-IT', {
-    day: '2-digit',
-    month: 'short'
-  });
+  return d.toLocaleDateString('it-IT', { day: '2-digit', month: 'short' });
 }
 
 function reminderTime(item) {
@@ -553,25 +408,15 @@ function reminderTime(item) {
   const d = new Date(item.start);
   if (isNaN(d.getTime())) return '';
 
-  return d.toLocaleTimeString('it-IT', {
-    hour: '2-digit',
-    minute: '2-digit'
-  });
+  return d.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' });
 }
-
-
-// ============================================================
-// REMINDER ACCENT — same color as Dashboard / Google Calendar
-// ============================================================
 
 function reminderAccentHex(item) {
   const value = String(
     item && (item.color || item.personalOSColor) || COLORS.blue
   ).trim();
 
-  return /^#[0-9a-f]{6}$/i.test(value)
-    ? value
-    : COLORS.blue;
+  return /^#[0-9a-f]{6}$/i.test(value) ? value : COLORS.blue;
 }
 
 function reminderAccent(item) {
@@ -585,9 +430,7 @@ function reminderTextColor(item) {
   const b = parseInt(color.slice(5, 7), 16);
   const luminance = (r * 299 + g * 587 + b * 114) / 1000;
 
-  return new Color(
-    luminance > 160 ? COLORS.ink : '#FFFFFF'
-  );
+  return new Color(luminance > 160 ? COLORS.ink : '#FFFFFF');
 }
 
 function sameCalendarDay(a, b) {
@@ -598,22 +441,12 @@ function sameCalendarDay(a, b) {
   );
 }
 
-
-// ============================================================
-// FINANCE
-// ============================================================
-
 function buildFinance(widget, finance) {
-  const period = widget.addText(
-    finance.periodLabel || 'Questo mese'
-  );
+  const period = widget.addText(finance.periodLabel || 'Questo mese');
   period.font = Font.systemFont(11);
   period.lineLimit = 1;
   period.minimumScaleFactor = 1;
-  period.textColor = Color.dynamic(
-    new Color(COLORS.inkSoft),
-    new Color('#999999')
-  );
+  period.textColor = Color.dynamic(new Color(COLORS.inkSoft), new Color('#999999'));
 
   widget.addSpacer(5);
 
@@ -632,9 +465,7 @@ function buildFinance(widget, finance) {
 
   widget.addSpacer(9);
 
-  const pct = finance.budgetUsedPct == null
-    ? '—'
-    : `${finance.budgetUsedPct}%`;
+  const pct = finance.budgetUsedPct == null ? '—' : `${finance.budgetUsedPct}%`;
 
   const foot = widget.addText(
     `${pct} del budget · ${Number(finance.transactionsThisMonth || 0)} movimenti`
@@ -642,10 +473,7 @@ function buildFinance(widget, finance) {
   foot.font = Font.systemFont(11);
   foot.lineLimit = 1;
   foot.minimumScaleFactor = 1;
-  foot.textColor = Color.dynamic(
-    new Color(COLORS.inkSoft),
-    new Color('#AAAAAA')
-  );
+  foot.textColor = Color.dynamic(new Color(COLORS.inkSoft), new Color('#AAAAAA'));
 }
 
 function addMetric(stack, labelText, valueText) {
@@ -653,41 +481,22 @@ function addMetric(stack, labelText, valueText) {
   label.font = Font.systemFont(11);
   label.lineLimit = 1;
   label.minimumScaleFactor = 1;
-  label.textColor = Color.dynamic(
-    new Color(COLORS.inkSoft),
-    new Color('#999999')
-  );
+  label.textColor = Color.dynamic(new Color(COLORS.inkSoft), new Color('#999999'));
 
   const value = stack.addText(valueText);
   value.font = Font.boldSystemFont(22);
   value.lineLimit = 1;
   value.minimumScaleFactor = 1;
-  value.textColor = Color.dynamic(
-    new Color(COLORS.ink),
-    Color.white()
-  );
+  value.textColor = Color.dynamic(new Color(COLORS.ink), Color.white());
 }
-
-
-// ============================================================
-// EMPTY
-// ============================================================
 
 function addEmpty(widget, text) {
   const t = widget.addText(text);
   t.font = Font.systemFont(12);
   t.lineLimit = 2;
   t.minimumScaleFactor = 1;
-  t.textColor = Color.dynamic(
-    new Color(COLORS.inkFaint),
-    new Color('#888888')
-  );
+  t.textColor = Color.dynamic(new Color(COLORS.inkFaint), new Color('#888888'));
 }
-
-
-// ============================================================
-// EURO FORMAT
-// ============================================================
 
 function formatEuro(value) {
   return Number(value || 0).toLocaleString('it-IT', {
@@ -697,18 +506,10 @@ function formatEuro(value) {
   });
 }
 
-
-// ============================================================
-// CACHE
-// ============================================================
-
 function saveCache(data) {
   try {
     const fm = FileManager.local();
-    const path = fm.joinPath(
-      fm.documentsDirectory(),
-      CONFIG.cacheFile
-    );
+    const path = fm.joinPath(fm.documentsDirectory(), CONFIG.cacheFile);
     fm.writeString(path, JSON.stringify(data));
   } catch (error) {
     console.log('Cache write error: ' + error);
@@ -718,10 +519,7 @@ function saveCache(data) {
 function loadCache() {
   try {
     const fm = FileManager.local();
-    const path = fm.joinPath(
-      fm.documentsDirectory(),
-      CONFIG.cacheFile
-    );
+    const path = fm.joinPath(fm.documentsDirectory(), CONFIG.cacheFile);
 
     if (!fm.fileExists(path)) return null;
     return JSON.parse(fm.readString(path));

@@ -29,7 +29,7 @@
   }
 
   function proxyJson(url) {
-    return fetch('/api/google?url=' + encodeURIComponent(url), {
+    return fetch('/api/finance?url=' + encodeURIComponent(url), {
       method: 'GET',
       credentials: 'same-origin',
       cache: 'no-store'

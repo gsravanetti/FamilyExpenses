@@ -1,11 +1,6 @@
 (function () {
   'use strict';
 
-  var SPREADSHEET_ID = '1E6Lod_d0D0wOv3mrIErpSt9t5ntexGEnW-Ka0e4RXY0';
-  var TODO_SHEET = 'ToDo';
-  var COMPLETED_SHEET = 'ToDoCompleted';
-  var SHEETS = 'https://sheets.googleapis.com/v4/spreadsheets/';
-
   function esc(value) {
     return String(value == null ? '' : value).replace(/[&<>"']/g, function (c) {
       return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
@@ -21,126 +16,25 @@
     toast._timer = setTimeout(function () { el.classList.add('hidden'); }, 2800);
   }
 
-  function api(url, options) {
-    options = options || {};
-    var proxyOptions = Object.assign({}, options, { credentials: 'same-origin' });
-    proxyOptions.headers = Object.assign({'Content-Type':'application/json'}, options.headers || {});
-    return fetch('/api/google?url=' + encodeURIComponent(url), proxyOptions).then(function (response) {
+  function completedApi(method, body) {
+    var options = {
+      method: method,
+      credentials: 'same-origin',
+      cache: 'no-store'
+    };
+    if (body !== undefined) {
+      options.headers = { 'Content-Type': 'application/json' };
+      options.body = JSON.stringify(body);
+    }
+
+    return fetch('/api/todo-completed', options).then(function (response) {
       return response.text().then(function (text) {
-        var body = text ? JSON.parse(text) : {};
+        var payload = text ? JSON.parse(text) : {};
         if (!response.ok) {
-          throw new Error((body.error && body.error.message) || body.error || ('Errore HTTP ' + response.status));
+          throw new Error(payload.error || ('Errore HTTP ' + response.status));
         }
-        return body;
+        return payload;
       });
-    });
-  }
-
-  function sheetMeta() {
-    return api(SHEETS + encodeURIComponent(SPREADSHEET_ID) + '?fields=sheets.properties(sheetId,title,index)');
-  }
-
-  function findSheet(meta, title) {
-    var sheet = (meta.sheets || []).find(function (entry) {
-      return entry.properties && entry.properties.title === title;
-    });
-    return sheet ? sheet.properties : null;
-  }
-
-  function addSheet(title) {
-    return api(SHEETS + encodeURIComponent(SPREADSHEET_ID) + ':batchUpdate', {
-      method: 'POST',
-      body: JSON.stringify({ requests: [{ addSheet: { properties: { title: title } } }] })
-    });
-  }
-
-  function getValues(range) {
-    return api(SHEETS + encodeURIComponent(SPREADSHEET_ID) + '/values/' + encodeURIComponent(range));
-  }
-
-  function updateValues(range, values) {
-    return api(SHEETS + encodeURIComponent(SPREADSHEET_ID) + '/values/' + encodeURIComponent(range) + '?valueInputOption=RAW', {
-      method: 'PUT',
-      body: JSON.stringify({ range: range, majorDimension: 'ROWS', values: values })
-    });
-  }
-
-  function appendValues(range, values) {
-    return api(SHEETS + encodeURIComponent(SPREADSHEET_ID) + '/values/' + encodeURIComponent(range) + ':append?valueInputOption=RAW&insertDataOption=INSERT_ROWS', {
-      method: 'POST',
-      body: JSON.stringify({ values: values })
-    });
-  }
-
-  function deleteTodoRow(sheetId, rowNumber) {
-    return api(SHEETS + encodeURIComponent(SPREADSHEET_ID) + ':batchUpdate', {
-      method: 'POST',
-      body: JSON.stringify({
-        requests: [{
-          deleteDimension: {
-            range: {
-              sheetId: sheetId,
-              dimension: 'ROWS',
-              startIndex: rowNumber - 1,
-              endIndex: rowNumber
-            }
-          }
-        }]
-      })
-    });
-  }
-
-  function ensureCompletedSheet() {
-    return sheetMeta().then(function (meta) {
-      if (findSheet(meta, COMPLETED_SHEET)) return meta;
-      return addSheet(COMPLETED_SHEET).then(sheetMeta);
-    }).then(function (meta) {
-      return getValues(COMPLETED_SHEET + '!A1:E1').then(function (data) {
-        if ((data.values || []).length) return meta;
-        return updateValues(COMPLETED_SHEET + '!A1:E1', [[
-          'ID', 'CreatedAt', 'CompletedAt', 'Title', 'Note'
-        ]]).then(function () { return meta; });
-      });
-    });
-  }
-
-  function activeTodo(rowNumber) {
-    return getValues(TODO_SHEET + '!A' + rowNumber + ':D' + rowNumber).then(function (data) {
-      var row = (data.values || [])[0] || [];
-      if (!row[2]) throw new Error('To do non trovato. Aggiorna la dashboard e riprova.');
-      return {
-        id: row[0] || ('legacy_' + rowNumber + '_' + Date.now()),
-        createdAt: row[1] || '',
-        title: row[2] || '',
-        note: row[3] || ''
-      };
-    });
-  }
-
-  function archiveTodo(rowNumber) {
-    var meta;
-    var todo;
-    return ensureCompletedSheet().then(function (freshMeta) {
-      meta = freshMeta;
-      if (!findSheet(meta, TODO_SHEET)) throw new Error('Foglio ToDo non trovato.');
-      return activeTodo(rowNumber);
-    }).then(function (item) {
-      todo = item;
-      return getValues(COMPLETED_SHEET + '!A2:A');
-    }).then(function (completedIds) {
-      var exists = (completedIds.values || []).some(function (row) {
-        return String(row[0] || '') === String(todo.id);
-      });
-      if (exists) return null;
-      return appendValues(COMPLETED_SHEET + '!A:E', [[
-        todo.id,
-        todo.createdAt,
-        new Date().toISOString(),
-        todo.title,
-        todo.note
-      ]]);
-    }).then(function () {
-      return deleteTodoRow(findSheet(meta, TODO_SHEET).sheetId, rowNumber);
     });
   }
 
@@ -154,7 +48,8 @@
 
   function handleTodoCompletion(event) {
     var button = event.target && event.target.closest ? event.target.closest('[data-tododone]') : null;
-    if (!button || !document.getElementById('todoList').contains(button)) return;
+    var todoList = document.getElementById('todoList');
+    if (!button || !todoList || !todoList.contains(button)) return;
 
     event.preventDefault();
     event.stopImmediatePropagation();
@@ -167,13 +62,12 @@
     button.classList.add('busy');
     button.disabled = true;
 
-    archiveTodo(rowNumber).then(function () {
+    completedApi('POST', { rowNumber: rowNumber }).then(function () {
       var item = button.closest('.item');
       if (item) item.remove();
       normalizeActiveRowsAfterDelete(rowNumber);
-      var list = document.getElementById('todoList');
-      if (list && !list.querySelector('.item')) {
-        list.innerHTML = '<div class="empty"><div class="empty-glyph">✓</div>Nessun To do aperto.</div>';
+      if (!todoList.querySelector('.item')) {
+        todoList.innerHTML = '<div class="empty"><div class="empty-glyph">✓</div>Nessun To do aperto.</div>';
       }
       toast('To do completato e archiviato.');
     }).catch(function (error) {
@@ -194,41 +88,31 @@
     });
   }
 
+  function renderCompleted(items) {
+    var list = document.getElementById('completedTodoList');
+    if (!list) return;
+    if (!items.length) {
+      list.innerHTML = '<div class="empty"><div class="empty-glyph">✓</div>Nessun To do completato.</div>';
+      return;
+    }
+
+    list.innerHTML = items.map(function (item) {
+      var sub = 'Completato ' + formatCompletedAt(item.completedAt);
+      if (item.note) sub += ' · ' + item.note;
+      return '<div class="item completed-item">' +
+        '<span class="completed-check" aria-hidden="true">✓</span>' +
+        '<div class="item-main"><div class="item-title">' + esc(item.title) + '</div>' +
+        '<div class="item-sub">' + esc(sub) + '</div></div></div>';
+    }).join('');
+  }
+
   function loadCompleted() {
     var list = document.getElementById('completedTodoList');
     if (!list) return Promise.resolve();
     list.innerHTML = '<div class="loader"><span class="spin"></span>Caricamento…</div>';
 
-    return ensureCompletedSheet().then(function () {
-      return getValues(COMPLETED_SHEET + '!A2:E');
-    }).then(function (data) {
-      var items = (data.values || []).map(function (row) {
-        return {
-          id: row[0] || '',
-          createdAt: row[1] || '',
-          completedAt: row[2] || '',
-          title: row[3] || '',
-          note: row[4] || ''
-        };
-      }).filter(function (item) { return item.title; });
-
-      items.sort(function (a, b) {
-        return (new Date(b.completedAt).getTime() || 0) - (new Date(a.completedAt).getTime() || 0);
-      });
-
-      if (!items.length) {
-        list.innerHTML = '<div class="empty"><div class="empty-glyph">✓</div>Nessun To do completato.</div>';
-        return;
-      }
-
-      list.innerHTML = items.map(function (item) {
-        var sub = 'Completato ' + formatCompletedAt(item.completedAt);
-        if (item.note) sub += ' · ' + item.note;
-        return '<div class="item completed-item">' +
-          '<span class="completed-check" aria-hidden="true">✓</span>' +
-          '<div class="item-main"><div class="item-title">' + esc(item.title) + '</div>' +
-          '<div class="item-sub">' + esc(sub) + '</div></div></div>';
-      }).join('');
+    return completedApi('GET').then(function (payload) {
+      renderCompleted(payload.items || []);
     }).catch(function (error) {
       list.innerHTML = '<div class="empty"><div class="empty-glyph">!</div>Errore di caricamento.</div>';
       toast(error.message);

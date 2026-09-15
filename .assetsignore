@@ -5,6 +5,7 @@
 worker.js
 worker-entry.js
 widget.js
+sport-tile.js
 wrangler.jsonc
 prepare-secrets.mjs
 .secrets.json

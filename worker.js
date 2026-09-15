@@ -226,7 +226,7 @@ async function mergedCalendarEvents(sharedTarget, accessToken) {
   const [shared, personal, colors, sharedCalendar, personalCalendar] = await Promise.all([
     calendarApiJson(sharedTarget, accessToken),
     calendarApiJson(personalTarget, accessToken),
-    calendarColorsJson(),
+    calendarColorsJson(accessToken),
     calendarListEntry(CALENDAR_ID, accessToken),
     calendarListEntry('primary', accessToken)
   ]);
@@ -273,9 +273,11 @@ function normalizeCalendarColor(value, fallback) {
   return /^#[0-9a-f]{6}$/i.test(color) ? color : fallback;
 }
 
-async function calendarColorsJson() {
+async function calendarColorsJson(accessToken) {
   try {
-    const response = await fetch('https://www.googleapis.com/calendar/v3/colors');
+    const response = await fetch('https://www.googleapis.com/calendar/v3/colors', {
+      headers: { Authorization: `Bearer ${accessToken}` }
+    });
     const body = await response.json().catch(() => ({}));
     return response.ok ? body : { calendar: {}, event: {} };
   } catch {

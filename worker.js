@@ -63,7 +63,7 @@ async function startLogin(request, env) {
     client_id: env.GOOGLE_CLIENT_ID,
     redirect_uri: redirectUri,
     response_type: 'code',
-    scope: 'openid email profile https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/spreadsheets',
+    scope: 'openid email profile https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/calendar.calendarlist.readonly https://www.googleapis.com/auth/spreadsheets',
     access_type: 'offline',
     include_granted_scopes: 'true',
     prompt: 'consent',
@@ -223,16 +223,21 @@ async function mergedCalendarEvents(sharedTarget, accessToken) {
   const personalTarget = new URL(sharedTarget.toString());
   personalTarget.pathname = '/calendar/v3/calendars/primary/events';
 
-  const [shared, personal] = await Promise.all([
+  const [shared, personal, colors, sharedCalendar, personalCalendar] = await Promise.all([
     calendarApiJson(sharedTarget, accessToken),
-    calendarApiJson(personalTarget, accessToken)
+    calendarApiJson(personalTarget, accessToken),
+    calendarColorsJson(),
+    calendarListEntry(CALENDAR_ID, accessToken),
+    calendarListEntry('primary', accessToken)
   ]);
 
+  const sharedItems = decorateCalendarEvents(shared.items || [], 'shared', sharedCalendar, colors, '#039BE5');
+  const personalItems = decorateCalendarEvents(personal.items || [], 'personal', personalCalendar, colors, '#7986CB');
   const maxResults = Math.max(1, Math.min(Number(sharedTarget.searchParams.get('maxResults')) || 250, 2500));
   const seen = new Set();
   const items = [];
 
-  for (const event of [...(shared.items || []), ...(personal.items || [])]) {
+  for (const event of [...sharedItems, ...personalItems]) {
     const start = event?.start?.dateTime || event?.start?.date || '';
     const key = event?.iCalUID
       ? `ical:${event.iCalUID}|${start}`
@@ -246,6 +251,47 @@ async function mergedCalendarEvents(sharedTarget, accessToken) {
   const result = { ...shared, items: items.slice(0, maxResults) };
   delete result.nextPageToken;
   return result;
+}
+
+function decorateCalendarEvents(items, source, calendar, colors, fallbackColor) {
+  const calendarColor = normalizeCalendarColor(
+    calendar?.backgroundColor || colors?.calendar?.[calendar?.colorId]?.background,
+    fallbackColor
+  );
+  return items.map(event => ({
+    ...event,
+    personalOSCalendar: source,
+    personalOSColor: normalizeCalendarColor(
+      colors?.event?.[event?.colorId]?.background,
+      calendarColor
+    )
+  }));
+}
+
+function normalizeCalendarColor(value, fallback) {
+  const color = String(value || '').trim();
+  return /^#[0-9a-f]{6}$/i.test(color) ? color : fallback;
+}
+
+async function calendarColorsJson() {
+  try {
+    const response = await fetch('https://www.googleapis.com/calendar/v3/colors');
+    const body = await response.json().catch(() => ({}));
+    return response.ok ? body : { calendar: {}, event: {} };
+  } catch {
+    return { calendar: {}, event: {} };
+  }
+}
+
+async function calendarListEntry(calendarId, accessToken) {
+  const url = new URL(`https://www.googleapis.com/calendar/v3/users/me/calendarList/${encodeURIComponent(calendarId)}`);
+  url.searchParams.set('colorRgbFormat', 'true');
+  try {
+    return await calendarApiJson(url, accessToken);
+  } catch (error) {
+    if (error instanceof HttpError && (error.status === 401 || error.status === 403 || error.status === 404)) return null;
+    throw error;
+  }
 }
 
 async function calendarApiJson(url, accessToken) {

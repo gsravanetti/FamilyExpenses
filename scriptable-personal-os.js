@@ -1,5 +1,5 @@
 // PERSONAL OS — Scriptable multi-widget
-// Add the same script 3 times to the iOS Home Screen and set Widget Parameter to:
+// Add the same script 3 times and set Widget Parameter to:
 // todo | reminder | finance
 
 const CONFIG = {
@@ -7,25 +7,21 @@ const CONFIG = {
   baseUrl: 'https://family-expenses.gs-ravanetti.workers.dev/',
   financeUrl: 'https://family-expenses.gs-ravanetti.workers.dev/finance.html',
   tokenKey: 'personal_os_widget_token_v1',
-  cacheFile: 'personal-os-widget-cache.json',
+  cacheFile: 'personal-os-widget-cache-v2.json',
   requestedRefreshMinutes: 30
 };
 
 const mode = String(args.widgetParameter || 'todo').toLowerCase();
 const token = await getToken();
-const payload = await loadData(token);
-const widget = buildWidget(mode, payload.data, payload.source);
+const result = await loadData(token);
+const widget = buildWidget(mode, result);
 
 const nextRefresh = new Date();
 nextRefresh.setMinutes(nextRefresh.getMinutes() + CONFIG.requestedRefreshMinutes);
 widget.refreshAfterDate = nextRefresh;
 Script.setWidget(widget);
 
-if (!config.runsInWidget) {
-  if (mode === 'finance') await widget.presentMedium();
-  else await widget.presentMedium();
-}
-
+if (!config.runsInWidget) await widget.presentMedium();
 Script.complete();
 
 async function getToken() {
@@ -34,10 +30,10 @@ async function getToken() {
 
   const alert = new Alert();
   alert.title = 'Personal OS';
-  alert.message = 'Inserisci il token del widget. Verrà salvato nel Keychain di iOS.';
+  alert.message = 'Inserisci WIDGET_TOKEN. Verrà salvato nel Keychain di iOS.';
   alert.addSecureTextField('Widget token', '');
   alert.addAction('Salva');
-  alert.addCancelAction('Più tardi');
+  alert.addCancelAction('Annulla');
   const action = await alert.presentAlert();
   if (action === -1) return null;
   const value = alert.textFieldValue(0).trim();
@@ -47,35 +43,63 @@ async function getToken() {
 }
 
 async function loadData(token) {
-  if (!token) return { data: demoData(), source: 'demo' };
+  if (!token) return { source: 'error', error: 'Token widget mancante.' };
+
   try {
     const req = new Request(CONFIG.apiUrl);
     req.method = 'GET';
-    req.timeoutInterval = 12;
-    req.headers = {
-      Authorization: `Bearer ${token}`,
-      Accept: 'application/json'
-    };
+    req.timeoutInterval = 15;
+    req.headers = { Authorization: `Bearer ${token}`, Accept: 'application/json' };
+
     const data = await req.loadJSON();
-    if (!data || typeof data !== 'object') throw new Error('Risposta API non valida');
+    const status = req.response ? Number(req.response.statusCode || 0) : 0;
+
+    if (status && (status < 200 || status >= 300)) {
+      throw new Error(`HTTP ${status}: ${data && data.error ? data.error : 'errore API'}`);
+    }
+    if (!isValidPayload(data)) {
+      throw new Error(data && data.error ? data.error : 'Risposta API incompleta o non valida.');
+    }
+
     saveCache(data);
-    return { data, source: 'live' };
+    return { source: 'live', data };
   } catch (error) {
-    console.log('Widget API error: ' + error);
+    const message = String(error && error.message ? error.message : error);
+    console.log('Widget API error: ' + message);
+
     const cached = loadCache();
-    if (cached) return { data: cached, source: 'cache' };
-    return { data: demoData(), source: 'demo' };
+    if (isValidPayload(cached)) return { source: 'cache', data: cached, error: message };
+    return { source: 'error', error: message };
   }
 }
 
-function buildWidget(mode, data, source) {
+function isValidPayload(data) {
+  return !!(
+    data &&
+    typeof data === 'object' &&
+    data.version === 1 &&
+    data.updatedAt &&
+    data.todo &&
+    data.reminder &&
+    data.finance
+  );
+}
+
+function buildWidget(mode, result) {
   const widget = new ListWidget();
   widget.setPadding(15, 15, 13, 15);
   widget.backgroundColor = Color.dynamic(new Color('#F5F5F7'), new Color('#171717'));
 
-  addHeader(widget, mode, source);
+  addHeader(widget, mode, result.source);
   widget.addSpacer(10);
 
+  if (result.source === 'error') {
+    buildError(widget, result.error);
+    widget.url = CONFIG.baseUrl;
+    return widget;
+  }
+
+  const data = result.data;
   if (mode === 'reminder') {
     buildReminder(widget, data.reminder || {});
     widget.url = CONFIG.baseUrl;
@@ -94,15 +118,32 @@ function buildWidget(mode, data, source) {
 
 function addHeader(widget, mode, source) {
   const row = widget.addStack();
-  const title = row.addText(
-    mode === 'finance' ? 'FINANCE' : mode === 'reminder' ? 'REMINDER' : 'TO DO'
-  );
+  const title = row.addText(mode === 'finance' ? 'FINANCE' : mode === 'reminder' ? 'REMINDER' : 'TO DO');
   title.font = Font.semiboldSystemFont(12);
   title.textColor = Color.dynamic(new Color('#555555'), new Color('#BBBBBB'));
   row.addSpacer();
-  const status = row.addText(source === 'live' ? 'LIVE' : source === 'cache' ? 'CACHE' : 'DEMO');
+
+  const label = source === 'live' ? 'LIVE' : source === 'cache' ? 'CACHE' : 'ERROR';
+  const status = row.addText(label);
   status.font = Font.boldSystemFont(8);
   status.textColor = Color.dynamic(new Color('#888888'), new Color('#888888'));
+}
+
+function buildError(widget, message) {
+  const title = widget.addText('Sincronizzazione non riuscita');
+  title.font = Font.boldSystemFont(15);
+  title.textColor = Color.dynamic(Color.black(), Color.white());
+  widget.addSpacer(7);
+
+  const body = widget.addText(String(message || 'Errore sconosciuto'));
+  body.font = Font.systemFont(10);
+  body.lineLimit = 5;
+  body.textColor = Color.dynamic(new Color('#666666'), new Color('#AAAAAA'));
+  widget.addSpacer();
+
+  const hint = widget.addText('Apri lo script manualmente per leggere il messaggio completo.');
+  hint.font = Font.systemFont(8);
+  hint.textColor = Color.dynamic(new Color('#999999'), new Color('#777777'));
 }
 
 function buildTodo(widget, todo) {
@@ -116,7 +157,7 @@ function buildTodo(widget, todo) {
 
 function buildReminder(widget, reminder) {
   const count = Number(reminder.count || 0);
-  addCount(widget, count, count === 1 ? 'promemoria' : 'promemoria');
+  addCount(widget, count, 'promemoria');
   widget.addSpacer(8);
   const items = Array.isArray(reminder.items) ? reminder.items.slice(0, 4) : [];
   if (!items.length) return addEmpty(widget, 'Nessun reminder aperto');
@@ -124,9 +165,9 @@ function buildReminder(widget, reminder) {
 }
 
 function buildFinance(widget, finance) {
-  const label = widget.addText(finance.periodLabel || 'Questo mese');
-  label.font = Font.systemFont(10);
-  label.textColor = Color.dynamic(new Color('#777777'), new Color('#999999'));
+  const period = widget.addText(finance.periodLabel || 'Questo mese');
+  period.font = Font.systemFont(10);
+  period.textColor = Color.dynamic(new Color('#777777'), new Color('#999999'));
   widget.addSpacer(5);
 
   const row = widget.addStack();
@@ -172,7 +213,6 @@ function addListRow(widget, titleText, subtitleText, glyph) {
   const row = widget.addStack();
   row.layoutHorizontally();
   row.centerAlignContent();
-
   const icon = row.addText(glyph);
   icon.font = Font.semiboldSystemFont(11);
   icon.textColor = Color.dynamic(new Color('#777777'), new Color('#999999'));
@@ -212,9 +252,7 @@ function formatReminder(item) {
   if (isNaN(d.getTime())) return item.note || '';
   const today = new Date();
   const sameDay = d.getFullYear() === today.getFullYear() && d.getMonth() === today.getMonth() && d.getDate() === today.getDate();
-  if (item.allDay) {
-    return sameDay ? 'Oggi' : d.toLocaleDateString('it-IT', { day: '2-digit', month: 'short' });
-  }
+  if (item.allDay) return sameDay ? 'Oggi' : d.toLocaleDateString('it-IT', { day: '2-digit', month: 'short' });
   return sameDay
     ? 'Oggi · ' + d.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })
     : d.toLocaleDateString('it-IT', { day: '2-digit', month: 'short' }) + ' · ' + d.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' });
@@ -223,31 +261,23 @@ function formatReminder(item) {
 function formatCreated(value) {
   if (!value) return '';
   const d = new Date(value);
-  if (isNaN(d.getTime())) return '';
-  return 'Creato ' + d.toLocaleDateString('it-IT');
+  return isNaN(d.getTime()) ? '' : 'Creato ' + d.toLocaleDateString('it-IT');
 }
 
 function formatEuro(value) {
-  const n = Number(value || 0);
-  return n.toLocaleString('it-IT', {
-    style: 'currency',
-    currency: 'EUR',
-    maximumFractionDigits: 0
-  });
+  return Number(value || 0).toLocaleString('it-IT', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 });
 }
 
 function formatUpdatedAt(value) {
   if (!value) return '—';
   const d = new Date(value);
-  if (isNaN(d.getTime())) return '—';
-  return d.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' });
+  return isNaN(d.getTime()) ? '—' : d.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' });
 }
 
 function saveCache(data) {
   try {
     const fm = FileManager.local();
-    const path = fm.joinPath(fm.documentsDirectory(), CONFIG.cacheFile);
-    fm.writeString(path, JSON.stringify(data));
+    fm.writeString(fm.joinPath(fm.documentsDirectory(), CONFIG.cacheFile), JSON.stringify(data));
   } catch (error) {
     console.log('Cache write error: ' + error);
   }
@@ -263,32 +293,4 @@ function loadCache() {
     console.log('Cache read error: ' + error);
     return null;
   }
-}
-
-function demoData() {
-  return {
-    todo: {
-      count: 3,
-      items: [
-        { title: 'Inviare documenti alla banca', note: 'Demo' },
-        { title: 'Prenotare manutenzione', note: 'Demo' },
-        { title: 'Controllare assicurazione', note: 'Demo' }
-      ]
-    },
-    reminder: {
-      count: 2,
-      items: [
-        { title: 'Dentista', start: new Date(Date.now() + 2 * 3600000).toISOString(), allDay: false },
-        { title: 'Scadenza documento', start: new Date(Date.now() + 3 * 86400000).toISOString(), allDay: true }
-      ]
-    },
-    finance: {
-      periodLabel: new Date().toLocaleDateString('it-IT', { month: 'long', year: 'numeric' }),
-      monthExpenses: 1842,
-      budgetRemaining: 658,
-      budgetUsedPct: 73.7,
-      transactionsThisMonth: 28
-    },
-    updatedAt: new Date().toISOString()
-  };
 }

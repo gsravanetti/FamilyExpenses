@@ -80,7 +80,7 @@ async function loadTodos(accessToken) {
 
   return {
     count: items.length,
-    items: items.slice(0, 6)
+    items
   };
 }
 
@@ -114,7 +114,7 @@ async function loadReminders(accessToken) {
 
   return {
     count: visible.length,
-    items: visible.slice(0, 6)
+    items: visible
   };
 }
 

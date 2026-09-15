@@ -77,6 +77,34 @@ body{padding-bottom:38px}button,input,textarea,select{font:inherit;color:inherit
   padding:4px 10px 8px;
 }
 .item{min-height:63px}
+
+/* ---------- reminder timeline --------------------------------------------- */
+#remList{padding:7px 11px 10px 8px}
+#remList .reminder-item{
+  --event-color:var(--blue);--event-contrast:#fff;
+  position:relative;grid-template-columns:28px minmax(0,1fr) auto;
+  min-height:60px;padding:9px 7px;border-top:0;gap:10px;
+}
+#remList .reminder-item:not(:last-child)::before{
+  content:"";position:absolute;z-index:0;left:20px;top:31px;bottom:-9px;
+  width:1px;background:var(--line-strong);
+}
+#remList .reminder-item .check{
+  position:relative;z-index:1;width:12px;height:12px;margin-left:6px;padding:0;
+  border-radius:50%;border:2px solid #fff;background:var(--event-color);
+  box-shadow:0 0 0 1px var(--line-strong);transition:transform .15s,box-shadow .15s;
+}
+#remList .reminder-item .check:hover{
+  border-color:#fff;background:var(--event-color);transform:scale(1.18);
+  box-shadow:0 0 0 3px rgba(15,23,42,.07);
+}
+#remList .reminder-item .check.busy{background:var(--event-color);border-color:#fff}
+#remList .reminder-item .check.busy:after{content:"✓";font-size:7px;font-weight:950;color:var(--event-contrast);line-height:1}
+#remList .reminder-item .when{
+  background:var(--event-color);color:var(--event-contrast);
+  box-shadow:0 4px 10px rgba(15,23,42,.08);
+}
+
 .panel-add{
   border:0;color:#fff;border-radius:11px;
   padding:7px 11px;font-size:.72rem;font-weight:900;
@@ -87,7 +115,7 @@ body{padding-bottom:38px}button,input,textarea,select{font:inherit;color:inherit
 .panel-add:hover{filter:brightness(.97)}
 
 @media(max-width:760px){.grid{grid-template-columns:1fr}.panel{height:400px;min-height:400px}.status{display:none}.type-grid{grid-template-columns:1fr}.twocol{grid-template-columns:1fr 1fr}.action-tile{padding:12px;border-radius:22px}.action-btn{min-height:70px;border-radius:15px}.panel-head{padding:14px 14px 11px}}
-@media(max-width:460px){.shell{padding-left:11px;padding-right:11px}.topbar .btn.ghost{display:none}.brand h1{font-size:1.02rem}.item{grid-template-columns:30px minmax(0,1fr) auto;padding-left:5px;padding-right:5px}.when{max-width:86px;overflow:hidden;text-overflow:ellipsis}.action-grid{gap:7px}.action-btn{min-height:67px;padding:9px 5px;font-size:.7rem}.action-icon{width:29px;height:29px}.panel{height:390px;min-height:390px}.panel-title p{font-size:.66rem}.panel-add{padding:7px 10px}}
+@media(max-width:460px){.shell{padding-left:11px;padding-right:11px}.topbar .btn.ghost{display:none}.brand h1{font-size:1.02rem}.item{grid-template-columns:30px minmax(0,1fr) auto;padding-left:5px;padding-right:5px}.when{max-width:86px;overflow:hidden;text-overflow:ellipsis}.action-grid{gap:7px}.action-btn{min-height:67px;padding:9px 5px;font-size:.7rem}.action-icon{width:29px;height:29px}.panel{height:390px;min-height:390px}.panel-title p{font-size:.66rem}.panel-add{padding:7px 10px}#remList .reminder-item{grid-template-columns:27px minmax(0,1fr) auto;padding-left:4px;padding-right:4px}#remList .reminder-item:not(:last-child)::before{left:17px}#remList .reminder-item .check{margin-left:5px}}
 @media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 
 /* ---------- login globale -------------------------------------------------- */
@@ -148,7 +176,7 @@ body{padding-bottom:38px}button,input,textarea,select{font:inherit;color:inherit
     <article class="panel">
       <div class="panel-head">
         <div class="panel-icon rem">◷</div>
-        <div class="panel-title"><h2>Reminder</h2><p>Google Calendar condiviso · spuntare li nasconde solo qui</p></div>
+        <div class="panel-title"><h2>Reminder</h2><p>Google Calendar personale + condiviso · tocca il pallino per nasconderlo qui</p></div>
         <button class="panel-add rem" id="addReminderBtn" type="button">+Add</button>
       </div>
       <div class="list" id="remList"><div class="empty"><div class="empty-glyph">◷</div>Accedi per caricare i reminder.</div></div>
@@ -278,6 +306,8 @@ function api(url,options){
 function eventDate(ev){var raw=ev.start&&(ev.start.dateTime||ev.start.date);return raw?new Date(raw):null;}
 function eventWhen(ev){var d=eventDate(ev);if(!d)return '';var now=new Date();var same=isoDate(d)===isoDate(now);if(ev.start.date&&!ev.start.dateTime)return same?'Oggi':d.toLocaleDateString('it-IT',{day:'2-digit',month:'short'});return same?d.toLocaleTimeString('it-IT',{hour:'2-digit',minute:'2-digit'}):d.toLocaleDateString('it-IT',{day:'2-digit',month:'short'})+' · '+d.toLocaleTimeString('it-IT',{hour:'2-digit',minute:'2-digit'});}
 function eventClass(ev){var d=eventDate(ev);if(!d)return '';var now=new Date();if(isoDate(d)===isoDate(now))return 'today';var diff=(d-now)/86400000;return diff<7?'soon':'';}
+function eventColor(ev){var color=String(ev&&ev.personalOSColor||'#5B7CFA').trim();return /^#[0-9a-f]{6}$/i.test(color)?color:'#5B7CFA';}
+function eventContrast(ev){var color=eventColor(ev);var r=parseInt(color.slice(1,3),16),g=parseInt(color.slice(3,5),16),b=parseInt(color.slice(5,7),16);return (r*299+g*587+b*114)/1000>160?'#172033':'#FFFFFF';}
 function listCalendarEvents(){
   var now=new Date();
   var future=new Date(now.getTime()+365*86400000);
@@ -313,7 +343,7 @@ function completeReminder(eventId){return appendValues(CONFIG.doneSheet+'!A:B',[
 
 /* ---------- Rendering ----------------------------------------------------- */
 function renderEmpty(msg){$('remList').innerHTML='<div class="empty"><div class="empty-glyph">◷</div>'+esc(msg)+'</div>';$('todoList').innerHTML='<div class="empty"><div class="empty-glyph">✓</div>'+esc(msg)+'</div>';}
-function renderReminders(items){if(!items.length){$('remList').innerHTML='<div class="empty"><div class="empty-glyph">◷</div>Nessun reminder aperto.</div>';return;}$('remList').innerHTML=items.map(function(ev){var d=eventDate(ev);var sub=(d?d.toLocaleDateString('it-IT',{weekday:'short',day:'2-digit',month:'long'}):'')+(ev.description?' · '+ev.description:'');return '<div class="item"><button class="check" data-remdone="'+esc(ev.id)+'" aria-label="Segna fatto"></button><div class="item-main"><div class="item-title">'+esc(ev.summary||'(Senza titolo)')+'</div><div class="item-sub">'+esc(sub)+'</div></div><span class="when '+eventClass(ev)+'">'+esc(eventWhen(ev))+'</span></div>';}).join('');Array.prototype.forEach.call($('remList').querySelectorAll('[data-remdone]'),function(b){b.addEventListener('click',function(){var id=b.getAttribute('data-remdone');b.classList.add('busy');b.disabled=true;completeReminder(id).then(function(){b.closest('.item').remove();toast('Reminder completato. L\'evento resta in Calendar.');}).catch(function(e){b.classList.remove('busy');b.disabled=false;toast(e.message);});});});}
+function renderReminders(items){if(!items.length){$('remList').innerHTML='<div class="empty"><div class="empty-glyph">◷</div>Nessun reminder aperto.</div>';return;}$('remList').innerHTML=items.map(function(ev){var d=eventDate(ev);var sub=(d?d.toLocaleDateString('it-IT',{weekday:'short',day:'2-digit',month:'long'}):'')+(ev.description?' · '+ev.description:'');var color=eventColor(ev),contrast=eventContrast(ev);return '<div class="item reminder-item" style="--event-color:'+color+';--event-contrast:'+contrast+'"><button class="check" data-remdone="'+esc(ev.id)+'" aria-label="Segna fatto"></button><div class="item-main"><div class="item-title">'+esc(ev.summary||'(Senza titolo)')+'</div><div class="item-sub">'+esc(sub)+'</div></div><span class="when">'+esc(eventWhen(ev))+'</span></div>';}).join('');Array.prototype.forEach.call($('remList').querySelectorAll('[data-remdone]'),function(b){b.addEventListener('click',function(){var id=b.getAttribute('data-remdone');b.classList.add('busy');b.disabled=true;completeReminder(id).then(function(){b.closest('.item').remove();toast('Reminder completato. L\'evento resta in Calendar.');}).catch(function(e){b.classList.remove('busy');b.disabled=false;toast(e.message);});});});}
 function renderTodos(items){if(!items.length){$('todoList').innerHTML='<div class="empty"><div class="empty-glyph">✓</div>Nessun To do aperto.</div>';return;}$('todoList').innerHTML=items.map(function(td){return '<div class="item"><button class="check" data-tododone="'+td.row+'" aria-label="Segna fatto"></button><div class="item-main"><div class="item-title">'+esc(td.title)+'</div><div class="item-sub">'+esc(td.note||'Creato '+(td.createdAt?new Date(td.createdAt).toLocaleDateString('it-IT'):'') )+'</div></div><span class="when">To do</span></div>';}).join('');Array.prototype.forEach.call($('todoList').querySelectorAll('[data-tododone]'),function(b){b.addEventListener('click',function(){var row=+b.getAttribute('data-tododone');var prop=findSheet(State.metadata,CONFIG.todoSheet);if(!prop){toast('Foglio ToDo non trovato.');return;}b.classList.add('busy');b.disabled=true;deleteRow(prop.sheetId,row).then(function(){toast('To do eliminato dal Google Sheet.');return refreshAll();}).catch(function(e){b.classList.remove('busy');b.disabled=false;toast(e.message);});});});}
 function refreshAll(){
   if(!State.authenticated){renderEmpty('Accedi per caricare i dati.');return Promise.resolve();}

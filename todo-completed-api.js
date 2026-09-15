@@ -43,10 +43,13 @@ export async function handleTodoCompletedApi(request, env) {
         return json({ error: 'Richiesta non valida.' }, 400);
       }
       const rowNumber = Number(body?.rowNumber);
+      const expectedTitle = String(body?.title || '').trim();
       if (!Number.isInteger(rowNumber) || rowNumber < 2 || rowNumber > 100000) {
         return json({ error: 'Riga To do non valida.' }, 400);
       }
-      payload = { item: await archiveTodo(rowNumber, tokenResult.session.accessToken) };
+      payload = {
+        item: await archiveTodo(rowNumber, expectedTitle, tokenResult.session.accessToken)
+      };
     }
 
     const headers = {};
@@ -62,7 +65,7 @@ export async function handleTodoCompletedApi(request, env) {
   }
 }
 
-async function archiveTodo(rowNumber, accessToken) {
+async function archiveTodo(rowNumber, expectedTitle, accessToken) {
   const meta = await ensureCompletedSheet(accessToken);
   const todoSheet = findSheet(meta, TODO_SHEET);
   if (!todoSheet) throw httpError(404, 'Foglio ToDo non trovato.');
@@ -70,6 +73,9 @@ async function archiveTodo(rowNumber, accessToken) {
   const active = await getValues(`${TODO_SHEET}!A${rowNumber}:D${rowNumber}`, accessToken);
   const row = (active.values || [])[0] || [];
   if (!row[2]) throw httpError(409, 'To do non trovato. Aggiorna la dashboard e riprova.');
+  if (expectedTitle && String(row[2]).trim() !== expectedTitle) {
+    throw httpError(409, 'L’elenco To do è cambiato. Aggiorna la dashboard e riprova.');
+  }
 
   const item = {
     id: String(row[0] || stableLegacyId(row)),

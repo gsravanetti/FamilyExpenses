@@ -1,6 +1,8 @@
 (function () {
   'use strict';
 
+  var completionInFlight = false;
+
   function esc(value) {
     return String(value == null ? '' : value).replace(/[&<>"']/g, function (c) {
       return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
@@ -54,23 +56,32 @@
     event.preventDefault();
     event.stopImmediatePropagation();
     if (button.disabled || button.getAttribute('data-completing') === '1') return;
+    if (completionInFlight) {
+      toast('Attendi il completamento del To do precedente.');
+      return;
+    }
 
     var rowNumber = Number(button.getAttribute('data-tododone'));
     if (!rowNumber) return;
+    var item = button.closest('.item');
+    var titleNode = item ? item.querySelector('.item-title') : null;
+    var expectedTitle = titleNode ? titleNode.textContent.trim() : '';
 
+    completionInFlight = true;
     button.setAttribute('data-completing', '1');
     button.classList.add('busy');
     button.disabled = true;
 
-    completedApi('POST', { rowNumber: rowNumber }).then(function () {
-      var item = button.closest('.item');
+    completedApi('POST', { rowNumber: rowNumber, title: expectedTitle }).then(function () {
       if (item) item.remove();
       normalizeActiveRowsAfterDelete(rowNumber);
       if (!todoList.querySelector('.item')) {
         todoList.innerHTML = '<div class="empty"><div class="empty-glyph">✓</div>Nessun To do aperto.</div>';
       }
       toast('To do completato e archiviato.');
+      completionInFlight = false;
     }).catch(function (error) {
+      completionInFlight = false;
       button.removeAttribute('data-completing');
       button.classList.remove('busy');
       button.disabled = false;

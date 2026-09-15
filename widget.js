@@ -121,8 +121,20 @@ async function loadReminders(accessToken, env) {
     personalConnected ? calendarListEntry(personalId, accessToken) : Promise.resolve(null)
   ]);
 
-  const sharedItems = decorateCalendarEvents(shared.items || [], 'shared', sharedCalendar, colors, '#039BE5');
-  const personalItems = decorateCalendarEvents(personal.items || [], 'personal', personalCalendar, colors, '#7986CB');
+  const sharedItems = decorateCalendarEvents(
+    shared.items || [],
+    'shared',
+    sharedCalendar,
+    colors,
+    '#039BE5'
+  );
+  const personalItems = decorateCalendarEvents(
+    personal.items || [],
+    'personal',
+    personalCalendar,
+    colors,
+    '#7986CB'
+  );
 
   const visible = mergeCalendarItems(sharedItems, personalItems)
     .filter(event => event.status !== 'cancelled' && event.id && !done.has(event.id))
@@ -196,19 +208,49 @@ async function calendarListEntry(calendarId, accessToken) {
 }
 
 function mergeCalendarItems(sharedItems, personalItems) {
-  const seen = new Set();
-  const items = [];
+  const byKey = new Map();
+
   for (const event of [...sharedItems, ...personalItems]) {
     const start = event?.start?.dateTime || event?.start?.date || '';
     const key = event?.iCalUID
       ? `ical:${event.iCalUID}|${start}`
       : `event:${event?.id || ''}|${start}|${event?.summary || ''}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    items.push(event);
+
+    const existing = byKey.get(key);
+    if (!existing) {
+      byKey.set(key, event);
+      continue;
+    }
+
+    // Lo stesso evento può arrivare dal calendario condiviso e da quello personale.
+    // Con il service account una delle due copie può essere "povera" (senza titolo/colore).
+    // Manteniamo l'id canonico della prima copia per non rompere ReminderDone,
+    // ma prendiamo titolo, colorId, descrizione e metadati dalla copia più ricca.
+    const existingScore = calendarEventRichness(existing);
+    const candidateScore = calendarEventRichness(event);
+
+    if (candidateScore > existingScore) {
+      byKey.set(key, {
+        ...existing,
+        ...event,
+        id: existing.id || event.id
+      });
+    }
   }
+
+  const items = [...byKey.values()];
   items.sort((a, b) => calendarEventStartValue(a) - calendarEventStartValue(b));
   return items;
+}
+
+function calendarEventRichness(event) {
+  let score = 0;
+  if (String(event?.summary || '').trim()) score += 100;
+  if (event?.colorId) score += 30;
+  if (String(event?.description || '').trim()) score += 10;
+  if (String(event?.location || '').trim()) score += 5;
+  if (event?.personalOSCalendar === 'personal') score += 1;
+  return score;
 }
 
 function calendarEventStartValue(event) {

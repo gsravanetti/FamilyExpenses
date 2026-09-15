@@ -1,19 +1,29 @@
 // PERSONAL OS — Scriptable multi-widget
-// Add the same script 3 times and set Widget Parameter to:
-// todo | reminder | finance
+// Widget Parameter: todo | reminder | finance
 
 const CONFIG = {
   apiUrl: 'https://family-expenses.gs-ravanetti.workers.dev/api/widget',
   baseUrl: 'https://family-expenses.gs-ravanetti.workers.dev/',
   financeUrl: 'https://family-expenses.gs-ravanetti.workers.dev/finance.html',
   tokenKey: 'personal_os_widget_token_v2',
-  cacheFile: 'personal-os-widget-cache-v2.json',
+  cacheFile: 'personal-os-widget-cache-v3.json',
   requestedRefreshMinutes: 30
 };
 
-const queryMode = args.queryParameters && args.queryParameters.mode
-  ? args.queryParameters.mode
-  : null;
+const COLORS = {
+  bgLight: '#F4F7FB',
+  bgDark: '#171717',
+  ink: '#1F2937',
+  inkSoft: '#64748B',
+  inkFaint: '#94A3B8',
+  line: '#D9E2EE',
+  blue: '#2563EB',
+  green: '#10B981',
+  amber: '#F59E0B',
+  red: '#EF4444'
+};
+
+const queryMode = args.queryParameters && args.queryParameters.mode ? args.queryParameters.mode : null;
 const mode = String(queryMode || args.widgetParameter || 'todo').toLowerCase();
 
 const token = await getToken();
@@ -27,10 +37,6 @@ Script.setWidget(widget);
 
 if (!config.runsInWidget) await widget.presentMedium();
 Script.complete();
-
-// ============================================================
-// TOKEN
-// ============================================================
 
 async function getToken() {
   if (Keychain.contains(CONFIG.tokenKey)) return Keychain.get(CONFIG.tokenKey);
@@ -53,10 +59,6 @@ async function getToken() {
   return value;
 }
 
-// ============================================================
-// API
-// ============================================================
-
 async function loadData(token) {
   if (!token) return { source: 'error', error: 'Token widget mancante.' };
 
@@ -64,10 +66,7 @@ async function loadData(token) {
     const req = new Request(CONFIG.apiUrl);
     req.method = 'GET';
     req.timeoutInterval = 15;
-    req.headers = {
-      Authorization: `Bearer ${token}`,
-      Accept: 'application/json'
-    };
+    req.headers = { Authorization: `Bearer ${token}`, Accept: 'application/json' };
 
     const data = await req.loadJSON();
     const status = req.response ? Number(req.response.statusCode || 0) : 0;
@@ -87,10 +86,7 @@ async function loadData(token) {
     console.log('Widget API error: ' + message);
 
     const cached = loadCache();
-    if (isValidPayload(cached)) {
-      return { source: 'cache', data: cached, error: message };
-    }
-
+    if (isValidPayload(cached)) return { source: 'cache', data: cached, error: message };
     return { source: 'error', error: message };
   }
 }
@@ -107,19 +103,12 @@ function isValidPayload(data) {
   );
 }
 
-// ============================================================
-// WIDGET
-// ============================================================
-
 function buildWidget(mode, result) {
   const widget = new ListWidget();
   widget.setPadding(14, 15, 12, 15);
-  widget.backgroundColor = Color.dynamic(
-    new Color('#F5F5F7'),
-    new Color('#171717')
-  );
+  widget.backgroundColor = Color.dynamic(new Color(COLORS.bgLight), new Color(COLORS.bgDark));
 
-  addHeader(widget, mode, result.source);
+  addHeader(widget, mode);
   widget.addSpacer(mode === 'finance' ? 10 : 7);
 
   if (result.source === 'error') {
@@ -136,8 +125,6 @@ function buildWidget(mode, result) {
   } else if (mode === 'finance') {
     buildFinance(widget, data.finance || {});
     widget.url = CONFIG.financeUrl;
-    widget.addSpacer();
-    addUpdated(widget, data.updatedAt);
   } else {
     buildTodo(widget, data.todo || {});
     widget.url = CONFIG.baseUrl;
@@ -146,153 +133,122 @@ function buildWidget(mode, result) {
   return widget;
 }
 
-// ============================================================
-// HEADER + REFRESH
-// ============================================================
-
-function addHeader(widget, mode, source) {
+function addHeader(widget, mode) {
   const row = widget.addStack();
   row.centerAlignContent();
 
-  const titleText = mode === 'finance'
-    ? 'FINANCE'
-    : mode === 'reminder'
-      ? 'REMINDER'
-      : 'TASK';
-
+  const titleText = mode === 'finance' ? 'FINANCE' : mode === 'reminder' ? 'REMINDER' : 'TASK';
   const title = row.addText(titleText);
   title.font = Font.semiboldSystemFont(12);
-  title.textColor = Color.dynamic(
-    new Color('#4B5563'),
-    new Color('#D1D5DB')
-  );
+  title.textColor = Color.dynamic(new Color(COLORS.ink), Color.white());
 
   row.addSpacer();
 
-  const sourceText = source === 'live'
-    ? 'LIVE'
-    : source === 'cache'
-      ? 'CACHE'
-      : 'ERROR';
-
-  const status = row.addText(sourceText);
-  status.font = Font.boldSystemFont(8);
-  status.textColor = Color.dynamic(
-    new Color('#9CA3AF'),
-    new Color('#7D8590')
-  );
-
   if (mode === 'todo' || mode === 'reminder') {
-    row.addSpacer(9);
     addRefreshButton(row, mode);
   }
 }
 
 function addRefreshButton(row, mode) {
-  const hit = row.addStack();
-  hit.centerAlignContent();
-  hit.url = makeRefreshUrl(mode);
+  const button = row.addStack();
+  button.layoutHorizontally();
+  button.centerAlignContent();
+  button.backgroundColor = new Color(COLORS.blue);
+  button.cornerRadius = 7;
+  button.setPadding(5, 8, 5, 8);
+  button.url = makeRefreshUrl(mode);
 
   const symbol = SFSymbol.named('arrow.clockwise');
-  symbol.applyFont(Font.mediumSystemFont(12));
+  symbol.applyFont(Font.semiboldSystemFont(9));
+  const image = button.addImage(symbol.image);
+  image.imageSize = new Size(10, 10);
+  image.tintColor = Color.white();
 
-  const image = hit.addImage(symbol.image);
-  image.imageSize = new Size(13, 13);
-  image.tintColor = Color.dynamic(
-    new Color('#6B7280'),
-    new Color('#A3A3A3')
-  );
+  button.addSpacer(4);
+
+  const label = button.addText('REFRESH');
+  label.font = Font.boldSystemFont(8);
+  label.textColor = Color.white();
 }
 
 function makeRefreshUrl(mode) {
   return `scriptable:///run?scriptName=${encodeURIComponent(Script.name())}&mode=${encodeURIComponent(mode)}`;
 }
 
-// ============================================================
-// ERROR VIEW
-// ============================================================
-
 function buildError(widget, message) {
   const title = widget.addText('Sincronizzazione non riuscita');
   title.font = Font.boldSystemFont(15);
-  title.textColor = Color.dynamic(Color.black(), Color.white());
-
+  title.textColor = Color.dynamic(new Color(COLORS.ink), Color.white());
   widget.addSpacer(7);
 
   const body = widget.addText(String(message || 'Errore sconosciuto'));
   body.font = Font.systemFont(10);
   body.lineLimit = 5;
-  body.textColor = Color.dynamic(
-    new Color('#666666'),
-    new Color('#AAAAAA')
-  );
+  body.textColor = Color.dynamic(new Color(COLORS.inkSoft), new Color('#AAAAAA'));
 }
 
-// ============================================================
-// TASK — 2 COLONNE, 6 TASK, TESTO SU 2 RIGHE
-// ============================================================
+// iOS widgets are static, not scrollable. Show as many rows as fit by family.
+function maxVisibleRows(kind) {
+  const family = config.widgetFamily || 'medium';
+  if (family === 'large') return kind === 'todo' ? 10 : 9;
+  if (family === 'small') return kind === 'todo' ? 3 : 3;
+  return kind === 'todo' ? 5 : 4;
+}
 
 function buildTodo(widget, todo) {
-  const items = Array.isArray(todo.items) ? todo.items.slice(0, 6) : [];
+  const all = Array.isArray(todo.items) ? todo.items : [];
+  const limit = maxVisibleRows('todo');
+  const items = all.slice(0, limit);
 
-  if (!items.length) {
-    return addEmpty(widget, 'Nessun task aperto');
-  }
+  if (!items.length) return addEmpty(widget, 'Nessun task aperto');
 
-  for (let i = 0; i < 3; i++) {
-    const row = widget.addStack();
-    row.layoutHorizontally();
+  items.forEach((item, index) => {
+    addTaskRow(widget, item);
+    if (index < items.length - 1) widget.addSpacer(5);
+  });
 
-    const left = items[i * 2];
-    const right = items[i * 2 + 1];
-
-    addTaskCell(row, left);
-    row.addSpacer(10);
-    addTaskCell(row, right);
-
-    if (i < 2) widget.addSpacer(6);
-  }
+  addMoreRow(widget, all.length - items.length);
 }
 
-function addTaskCell(row, item) {
-  const cell = row.addStack();
-  cell.layoutHorizontally();
-  cell.topAlignContent();
-  cell.size = new Size(140, 31);
+function addTaskRow(widget, item) {
+  const row = widget.addStack();
+  row.layoutHorizontally();
+  row.topAlignContent();
 
-  if (!item) return;
+  const mark = row.addStack();
+  mark.size = new Size(16, 16);
+  mark.cornerRadius = 5;
+  mark.backgroundColor = new Color(COLORS.blue);
+  mark.centerAlignContent();
 
-  const check = cell.addText('✓');
-  check.font = Font.boldSystemFont(10);
-  check.textColor = Color.dynamic(
-    new Color('#10B981'),
-    new Color('#34D399')
-  );
+  const symbol = SFSymbol.named('checkmark');
+  symbol.applyFont(Font.boldSystemFont(8));
+  const image = mark.addImage(symbol.image);
+  image.imageSize = new Size(8, 8);
+  image.tintColor = Color.white();
 
-  cell.addSpacer(6);
+  row.addSpacer(8);
 
-  const title = cell.addText(String(item.title || ''));
-  title.font = Font.semiboldSystemFont(10.5);
+  const title = row.addText(String(item.title || ''));
+  title.font = Font.semiboldSystemFont(11);
   title.lineLimit = 2;
-  title.minimumScaleFactor = 0.82;
-  title.textColor = Color.dynamic(Color.black(), Color.white());
+  title.minimumScaleFactor = 0.86;
+  title.textColor = Color.dynamic(new Color(COLORS.ink), Color.white());
 }
-
-// ============================================================
-// REMINDER — TIMELINE
-// ============================================================
 
 function buildReminder(widget, reminder) {
-  const items = Array.isArray(reminder.items) ? reminder.items.slice(0, 4) : [];
+  const all = Array.isArray(reminder.items) ? reminder.items : [];
+  const limit = maxVisibleRows('reminder');
+  const items = all.slice(0, limit);
 
-  if (!items.length) {
-    return addEmpty(widget, 'Nessun reminder aperto');
-  }
+  if (!items.length) return addEmpty(widget, 'Nessun reminder aperto');
 
   items.forEach((item, index) => {
     addTimelineRow(widget, item, index === items.length - 1);
-    if (index < items.length - 1) widget.addSpacer(2);
+    if (index < items.length - 1) widget.addSpacer(1);
   });
+
+  addMoreRow(widget, all.length - items.length);
 }
 
 function addTimelineRow(widget, item, isLast) {
@@ -303,59 +259,56 @@ function addTimelineRow(widget, item, isLast) {
   const rail = row.addStack();
   rail.layoutVertically();
   rail.centerAlignContent();
-  rail.size = new Size(15, 26);
-
-  rail.addSpacer(1);
+  rail.size = new Size(13, 27);
 
   const dot = rail.addText('●');
-  dot.font = Font.systemFont(8);
+  dot.font = Font.systemFont(7.5);
   dot.textColor = reminderAccent(item);
 
   if (!isLast) {
     const lineRow = rail.addStack();
     lineRow.layoutHorizontally();
-    lineRow.addSpacer(6.5);
+    lineRow.addSpacer(5.5);
     const line = lineRow.addStack();
-    line.size = new Size(1, 14);
-    line.backgroundColor = Color.dynamic(
-      new Color('#D1D5DB'),
-      new Color('#4B5563')
-    );
+    line.size = new Size(1, 16);
+    line.backgroundColor = Color.dynamic(new Color(COLORS.line), new Color('#4B5563'));
     lineRow.addSpacer();
   }
 
-  row.addSpacer(6);
+  row.addSpacer(4);
 
   const when = row.addStack();
   when.layoutVertically();
-  when.size = new Size(55, 25);
+  when.size = new Size(47, 26);
 
-  const dateText = when.addText(reminderDate(item));
-  dateText.font = Font.semiboldSystemFont(9.5);
-  dateText.lineLimit = 1;
-  dateText.textColor = Color.dynamic(
-    new Color('#374151'),
-    new Color('#D1D5DB')
-  );
+  const date = when.addText(reminderDate(item));
+  date.font = Font.semiboldSystemFont(9.5);
+  date.lineLimit = 1;
+  date.textColor = Color.dynamic(new Color(COLORS.inkSoft), new Color('#D1D5DB'));
 
   const timeText = reminderTime(item);
   if (timeText) {
     const time = when.addText(timeText);
-    time.font = Font.systemFont(8.5);
+    time.font = Font.systemFont(8);
     time.lineLimit = 1;
-    time.textColor = Color.dynamic(
-      new Color('#9CA3AF'),
-      new Color('#7D8590')
-    );
+    time.textColor = Color.dynamic(new Color(COLORS.inkFaint), new Color('#7D8590'));
   }
 
-  row.addSpacer(7);
+  row.addSpacer(3);
 
   const title = row.addText(String(item.title || ''));
   title.font = Font.semiboldSystemFont(10.5);
   title.lineLimit = 2;
-  title.minimumScaleFactor = 0.84;
-  title.textColor = Color.dynamic(Color.black(), Color.white());
+  title.minimumScaleFactor = 0.82;
+  title.textColor = Color.dynamic(new Color(COLORS.ink), Color.white());
+}
+
+function addMoreRow(widget, remaining) {
+  if (remaining <= 0) return;
+  widget.addSpacer(5);
+  const more = widget.addText(`+ ${remaining} altri`);
+  more.font = Font.semiboldSystemFont(9);
+  more.textColor = new Color(COLORS.blue);
 }
 
 function reminderDate(item) {
@@ -370,35 +323,27 @@ function reminderDate(item) {
   if (sameCalendarDay(d, today)) return 'Oggi';
   if (sameCalendarDay(d, tomorrow)) return 'Domani';
 
-  return d.toLocaleDateString('it-IT', {
-    day: '2-digit',
-    month: 'short'
-  });
+  return d.toLocaleDateString('it-IT', { day: '2-digit', month: 'short' });
 }
 
 function reminderTime(item) {
   if (!item || !item.start || item.allDay) return '';
   const d = new Date(item.start);
   if (isNaN(d.getTime())) return '';
-
-  return d.toLocaleTimeString('it-IT', {
-    hour: '2-digit',
-    minute: '2-digit'
-  });
+  return d.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' });
 }
 
 function reminderAccent(item) {
-  if (!item || !item.start) return new Color('#60A5FA');
-
+  if (!item || !item.start) return new Color(COLORS.blue);
   const d = new Date(item.start);
-  if (isNaN(d.getTime())) return new Color('#60A5FA');
+  if (isNaN(d.getTime())) return new Color(COLORS.blue);
 
   const now = new Date();
   const diffDays = (d.getTime() - now.getTime()) / 86400000;
 
-  if (sameCalendarDay(d, now)) return new Color('#EF4444');
-  if (diffDays <= 7) return new Color('#F59E0B');
-  return new Color('#3B82F6');
+  if (sameCalendarDay(d, now)) return new Color(COLORS.red);
+  if (diffDays <= 7) return new Color(COLORS.amber);
+  return new Color(COLORS.blue);
 }
 
 function sameCalendarDay(a, b) {
@@ -407,17 +352,10 @@ function sameCalendarDay(a, b) {
     a.getDate() === b.getDate();
 }
 
-// ============================================================
-// FINANCE — INVARIATO
-// ============================================================
-
 function buildFinance(widget, finance) {
   const period = widget.addText(finance.periodLabel || 'Questo mese');
   period.font = Font.systemFont(10);
-  period.textColor = Color.dynamic(
-    new Color('#777777'),
-    new Color('#999999')
-  );
+  period.textColor = Color.dynamic(new Color(COLORS.inkSoft), new Color('#999999'));
 
   widget.addSpacer(5);
 
@@ -436,54 +374,27 @@ function buildFinance(widget, finance) {
 
   widget.addSpacer(9);
 
-  const pct = finance.budgetUsedPct == null
-    ? '—'
-    : `${finance.budgetUsedPct}%`;
-
-  const foot = widget.addText(
-    `${pct} del budget · ${Number(finance.transactionsThisMonth || 0)} movimenti`
-  );
+  const pct = finance.budgetUsedPct == null ? '—' : `${finance.budgetUsedPct}%`;
+  const foot = widget.addText(`${pct} del budget · ${Number(finance.transactionsThisMonth || 0)} movimenti`);
   foot.font = Font.systemFont(10);
-  foot.textColor = Color.dynamic(
-    new Color('#666666'),
-    new Color('#AAAAAA')
-  );
+  foot.textColor = Color.dynamic(new Color(COLORS.inkSoft), new Color('#AAAAAA'));
 }
 
 function addMetric(stack, labelText, valueText) {
   const label = stack.addText(labelText);
   label.font = Font.systemFont(10);
-  label.textColor = Color.dynamic(
-    new Color('#777777'),
-    new Color('#999999')
-  );
+  label.textColor = Color.dynamic(new Color(COLORS.inkSoft), new Color('#999999'));
 
   const value = stack.addText(valueText);
   value.font = Font.boldSystemFont(21);
   value.minimumScaleFactor = 0.65;
-  value.textColor = Color.dynamic(Color.black(), Color.white());
+  value.textColor = Color.dynamic(new Color(COLORS.ink), Color.white());
 }
-
-// ============================================================
-// COMMON
-// ============================================================
 
 function addEmpty(widget, text) {
   const t = widget.addText(text);
   t.font = Font.systemFont(11);
-  t.textColor = Color.dynamic(
-    new Color('#888888'),
-    new Color('#888888')
-  );
-}
-
-function addUpdated(widget, value) {
-  const t = widget.addText('Aggiornato ' + formatUpdatedAt(value));
-  t.font = Font.systemFont(8);
-  t.textColor = Color.dynamic(
-    new Color('#AAAAAA'),
-    new Color('#777777')
-  );
+  t.textColor = Color.dynamic(new Color(COLORS.inkFaint), new Color('#888888'));
 }
 
 function formatEuro(value) {
@@ -493,18 +404,6 @@ function formatEuro(value) {
     maximumFractionDigits: 0
   });
 }
-
-function formatUpdatedAt(value) {
-  if (!value) return '—';
-  const d = new Date(value);
-  return isNaN(d.getTime())
-    ? '—'
-    : d.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' });
-}
-
-// ============================================================
-// CACHE
-// ============================================================
 
 function saveCache(data) {
   try {

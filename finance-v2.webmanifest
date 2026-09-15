@@ -1,0 +1,25 @@
+{
+  "id": "/finance",
+  "name": "Finance",
+  "short_name": "Finance",
+  "description": "Dashboard privata delle spese familiari.",
+  "start_url": "/finance",
+  "scope": "/finance",
+  "display": "standalone",
+  "background_color": "#005A3C",
+  "theme_color": "#005A3C",
+  "icons": [
+    {
+      "src": "/icons/finance/icon-192-v2.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/finance/icon-192.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ]
+}

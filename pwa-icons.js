@@ -8,8 +8,9 @@ export function injectPwaIcons(response, pathname) {
   const personal = pathname === '/' || pathname === '/index.html';
   if (!finance && !personal) return response;
 
-  const icon = finance ? '/icons/finance/icon-192.svg' : '/icons/personal-os/icon.svg';
-  const manifest = finance ? '/manifest.webmanifest' : '/personal-os.webmanifest';
+  const icon = finance ? '/icons/finance/icon-192-v2.png' : '/icons/personal-os/icon.svg';
+  const appleIcon = finance ? '/icons/finance/apple-touch-icon-v2.png' : '/icons/personal-os/icon.svg';
+  const manifest = finance ? '/finance-v2.webmanifest' : '/personal-os.webmanifest';
   const title = finance ? 'Finance' : 'Personal OS';
 
   let rewriter = new HTMLRewriter();
@@ -24,14 +25,14 @@ export function injectPwaIcons(response, pathname) {
       .on('link[rel="icon"]', {
         element(element) {
           element.setAttribute('href', icon);
-          element.setAttribute('type', 'image/svg+xml');
-          element.setAttribute('sizes', 'any');
+          element.setAttribute('type', 'image/png');
+          element.setAttribute('sizes', '192x192');
         }
       })
       .on('link[rel="apple-touch-icon"]', {
         element(element) {
-          element.setAttribute('href', icon);
-          element.setAttribute('sizes', '192x192');
+          element.setAttribute('href', appleIcon);
+          element.setAttribute('sizes', '180x180');
         }
       });
   } else {
@@ -40,7 +41,7 @@ export function injectPwaIcons(response, pathname) {
         element.append(
           `<link rel="manifest" href="${manifest}">` +
           `<link rel="icon" href="${icon}" type="image/svg+xml" sizes="any">` +
-          `<link rel="apple-touch-icon" href="${icon}" sizes="192x192">`,
+          `<link rel="apple-touch-icon" href="${appleIcon}" sizes="192x192">`,
           { html: true }
         );
       }

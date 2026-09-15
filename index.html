@@ -280,7 +280,7 @@ var State = { authenticated:false, calendarId:CONFIG.calendarId, metadata:null, 
 var $=function(id){return document.getElementById(id);};
 
 function toast(msg){var el=$('toast');el.textContent=msg;el.classList.remove('hidden');clearTimeout(toast._t);toast._t=setTimeout(function(){el.classList.add('hidden');},2800);}
-function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot',"'":'&#39;'}[c];});}
+function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
 function isoDate(d){return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
 function todayDefaults(){var d=new Date();$('remDate').value=isoDate(d);var h=d.getHours()+1;$('remTime').value=String(h%24).padStart(2,'0')+':00';}
 function status(text,online){$('statusText').textContent=text;$('status').classList.toggle('online',!!online);}

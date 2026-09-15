@@ -8,26 +8,26 @@ export default {
       const url = new URL(request.url);
 
       if (url.pathname === '/api/auth/login' && request.method === 'GET') {
-        return startLogin(request, env);
+        return await startLogin(request, env);
       }
       if (url.pathname === '/api/auth/callback' && request.method === 'GET') {
-        return finishLogin(request, env);
+        return await finishLogin(request, env);
       }
       if (url.pathname === '/api/auth/session' && request.method === 'GET') {
-        return sessionStatus(request, env);
+        return await sessionStatus(request, env);
       }
       if (url.pathname === '/api/auth/logout' && request.method === 'POST') {
         requireSameOrigin(request);
-        return logout(request, env);
+        return await logout(request, env);
       }
       if (url.pathname === '/api/google') {
-        return proxyGoogle(request, env);
+        return await proxyGoogle(request, env);
       }
       if (url.pathname.startsWith('/api/')) {
         return json({ error: 'Endpoint non trovato.' }, 404);
       }
 
-      return env.ASSETS.fetch(request);
+      return await env.ASSETS.fetch(request);
     } catch (error) {
       console.error(error);
       return json({ error: error instanceof Error ? error.message : 'Errore interno.' }, 500);

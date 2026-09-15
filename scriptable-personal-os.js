@@ -105,11 +105,20 @@ function isValidPayload(data) {
 
 function buildWidget(mode, result) {
   const widget = new ListWidget();
-  widget.setPadding(14, 15, 12, 15);
+  const family = config.widgetFamily || 'medium';
+  const compact = family === 'small';
+
+  widget.setPadding(
+    compact ? 6 : 10,
+    compact ? 10 : 13,
+    compact ? 6 : 10,
+    compact ? 10 : 13
+  );
+  widget.spacing = 0;
   widget.backgroundColor = Color.dynamic(new Color(COLORS.bgLight), new Color(COLORS.bgDark));
 
   addHeader(widget, mode);
-  widget.addSpacer(mode === 'finance' ? 10 : 7);
+  widget.addSpacer(mode === 'finance' ? 8 : (compact ? 3 : 5));
 
   if (result.source === 'error') {
     buildError(widget, result.error);
@@ -121,25 +130,29 @@ function buildWidget(mode, result) {
 
   if (mode === 'reminder') {
     buildReminder(widget, data.reminder || {});
-    widget.url = CONFIG.baseUrl;
+    widget.url = compact ? makeRefreshUrl(mode) : CONFIG.baseUrl;
   } else if (mode === 'finance') {
     buildFinance(widget, data.finance || {});
     widget.url = CONFIG.financeUrl;
   } else {
     buildTodo(widget, data.todo || {});
-    widget.url = CONFIG.baseUrl;
+    widget.url = compact ? makeRefreshUrl(mode) : CONFIG.baseUrl;
   }
 
   return widget;
 }
 
 function addHeader(widget, mode) {
+  const compact = (config.widgetFamily || 'medium') === 'small';
   const row = widget.addStack();
+  row.layoutHorizontally();
   row.centerAlignContent();
+  row.size = new Size(0, compact ? 23 : 26);
 
   const titleText = mode === 'finance' ? 'FINANCE' : mode === 'reminder' ? 'REMINDER' : 'TASK';
   const title = row.addText(titleText);
-  title.font = Font.semiboldSystemFont(12);
+  title.font = Font.semiboldSystemFont(compact ? 11 : 12);
+  title.lineLimit = 1;
   title.textColor = Color.dynamic(new Color(COLORS.ink), Color.white());
 
   row.addSpacer();
@@ -150,24 +163,28 @@ function addHeader(widget, mode) {
 }
 
 function addRefreshButton(row, mode) {
+  const compact = (config.widgetFamily || 'medium') === 'small';
   const button = row.addStack();
   button.layoutHorizontally();
   button.centerAlignContent();
   button.backgroundColor = new Color(COLORS.blue);
   button.cornerRadius = 7;
-  button.setPadding(5, 8, 5, 8);
+  button.size = new Size(compact ? 67 : 76, compact ? 22 : 24);
+  button.setPadding(compact ? 3 : 4, compact ? 5 : 6, compact ? 3 : 4, compact ? 5 : 6);
   button.url = makeRefreshUrl(mode);
 
   const symbol = SFSymbol.named('arrow.clockwise');
-  symbol.applyFont(Font.semiboldSystemFont(9));
+  symbol.applyFont(Font.semiboldSystemFont(compact ? 8 : 9));
   const image = button.addImage(symbol.image);
-  image.imageSize = new Size(10, 10);
+  image.imageSize = new Size(compact ? 8 : 9, compact ? 8 : 9);
   image.tintColor = Color.white();
 
-  button.addSpacer(4);
+  button.addSpacer(compact ? 3 : 4);
 
   const label = button.addText('REFRESH');
-  label.font = Font.boldSystemFont(8);
+  label.font = Font.boldSystemFont(compact ? 7.2 : 8);
+  label.lineLimit = 1;
+  label.minimumScaleFactor = 0.65;
   label.textColor = Color.white();
 }
 
@@ -190,9 +207,9 @@ function buildError(widget, message) {
 // iOS widgets are static, not scrollable. Show as many rows as fit by family.
 function maxVisibleRows(kind) {
   const family = config.widgetFamily || 'medium';
-  if (family === 'large') return kind === 'todo' ? 10 : 9;
-  if (family === 'small') return kind === 'todo' ? 3 : 3;
-  return kind === 'todo' ? 5 : 4;
+  if (family === 'large') return kind === 'todo' ? 10 : 10;
+  if (family === 'small') return kind === 'todo' ? 5 : 4;
+  return kind === 'todo' ? 6 : 5;
 }
 
 function buildTodo(widget, todo) {
@@ -204,19 +221,21 @@ function buildTodo(widget, todo) {
 
   items.forEach((item, index) => {
     addTaskRow(widget, item);
-    if (index < items.length - 1) widget.addSpacer(5);
+    if (index < items.length - 1) widget.addSpacer(4);
   });
 
   addMoreRow(widget, all.length - items.length);
 }
 
 function addTaskRow(widget, item) {
+  const compact = (config.widgetFamily || 'medium') === 'small';
   const row = widget.addStack();
   row.layoutHorizontally();
   row.topAlignContent();
+  row.size = new Size(0, compact ? 20 : 24);
 
   const mark = row.addStack();
-  mark.size = new Size(16, 16);
+  mark.size = new Size(compact ? 15 : 16, compact ? 15 : 16);
   mark.cornerRadius = 5;
   mark.backgroundColor = new Color(COLORS.blue);
   mark.centerAlignContent();
@@ -227,12 +246,12 @@ function addTaskRow(widget, item) {
   image.imageSize = new Size(8, 8);
   image.tintColor = Color.white();
 
-  row.addSpacer(8);
+  row.addSpacer(compact ? 7 : 8);
 
   const title = row.addText(String(item.title || ''));
-  title.font = Font.semiboldSystemFont(11);
-  title.lineLimit = 2;
-  title.minimumScaleFactor = 0.86;
+  title.font = Font.semiboldSystemFont(compact ? 10.5 : 11);
+  title.lineLimit = compact ? 1 : 2;
+  title.minimumScaleFactor = 0.80;
   title.textColor = Color.dynamic(new Color(COLORS.ink), Color.white());
 }
 
@@ -245,69 +264,73 @@ function buildReminder(widget, reminder) {
 
   items.forEach((item, index) => {
     addTimelineRow(widget, item, index === items.length - 1);
-    if (index < items.length - 1) widget.addSpacer(1);
   });
 
   addMoreRow(widget, all.length - items.length);
 }
 
 function addTimelineRow(widget, item, isLast) {
+  const compact = (config.widgetFamily || 'medium') === 'small';
   const row = widget.addStack();
   row.layoutHorizontally();
   row.centerAlignContent();
+  row.size = new Size(0, compact ? 23 : 27);
 
   const rail = row.addStack();
   rail.layoutVertically();
   rail.centerAlignContent();
-  rail.size = new Size(13, 27);
+  rail.size = new Size(compact ? 10 : 12, compact ? 23 : 27);
 
   const dot = rail.addText('●');
-  dot.font = Font.systemFont(7.5);
+  dot.font = Font.systemFont(compact ? 6.5 : 7.5);
   dot.textColor = reminderAccent(item);
 
   if (!isLast) {
     const lineRow = rail.addStack();
     lineRow.layoutHorizontally();
-    lineRow.addSpacer(5.5);
+    lineRow.addSpacer(compact ? 4 : 5);
     const line = lineRow.addStack();
-    line.size = new Size(1, 16);
+    line.size = new Size(1, compact ? 13 : 16);
     line.backgroundColor = Color.dynamic(new Color(COLORS.line), new Color('#4B5563'));
     lineRow.addSpacer();
   }
 
-  row.addSpacer(4);
+  row.addSpacer(compact ? 2 : 3);
 
   const when = row.addStack();
   when.layoutVertically();
-  when.size = new Size(47, 26);
+  when.size = new Size(compact ? 38 : 44, compact ? 22 : 26);
 
   const date = when.addText(reminderDate(item));
-  date.font = Font.semiboldSystemFont(9.5);
+  date.font = Font.semiboldSystemFont(compact ? 8.7 : 9.5);
   date.lineLimit = 1;
+  date.minimumScaleFactor = 0.75;
   date.textColor = Color.dynamic(new Color(COLORS.inkSoft), new Color('#D1D5DB'));
 
   const timeText = reminderTime(item);
   if (timeText) {
     const time = when.addText(timeText);
-    time.font = Font.systemFont(8);
+    time.font = Font.systemFont(compact ? 7.2 : 8);
     time.lineLimit = 1;
+    time.minimumScaleFactor = 0.75;
     time.textColor = Color.dynamic(new Color(COLORS.inkFaint), new Color('#7D8590'));
   }
 
-  row.addSpacer(3);
+  row.addSpacer(compact ? 2 : 3);
 
   const title = row.addText(String(item.title || ''));
-  title.font = Font.semiboldSystemFont(10.5);
-  title.lineLimit = 2;
-  title.minimumScaleFactor = 0.82;
+  title.font = Font.semiboldSystemFont(compact ? 9.4 : 10.5);
+  title.lineLimit = compact ? 1 : 2;
+  title.minimumScaleFactor = 0.68;
   title.textColor = Color.dynamic(new Color(COLORS.ink), Color.white());
 }
 
 function addMoreRow(widget, remaining) {
   if (remaining <= 0) return;
-  widget.addSpacer(5);
+  widget.addSpacer((config.widgetFamily || 'medium') === 'small' ? 2 : 4);
   const more = widget.addText(`+ ${remaining} altri`);
-  more.font = Font.semiboldSystemFont(9);
+  more.font = Font.semiboldSystemFont((config.widgetFamily || 'medium') === 'small' ? 8.3 : 9);
+  more.lineLimit = 1;
   more.textColor = new Color(COLORS.blue);
 }
 

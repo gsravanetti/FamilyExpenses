@@ -863,10 +863,18 @@ function addTimelineRow(
     row.addStack();
 
   when.layoutVertically();
+  when.backgroundColor = reminderAccent(item);
+  when.cornerRadius = compact ? 5 : 6;
+  when.setPadding(
+    compact ? 2 : 3,
+    compact ? 4 : 5,
+    compact ? 2 : 3,
+    compact ? 4 : 5
+  );
 
   when.size =
     new Size(
-      compact ? 38 : 44,
+      compact ? 42 : 49,
       compact ? 23 : 27
     );
 
@@ -882,12 +890,7 @@ function addTimelineRow(
 
   date.lineLimit = 1;
   date.minimumScaleFactor = 0.75;
-
-  date.textColor =
-    Color.dynamic(
-      new Color(COLORS.inkSoft),
-      new Color('#D1D5DB')
-    );
+  date.textColor = reminderTextColor(item);
 
   const timeText =
     reminderTime(item);
@@ -904,16 +907,11 @@ function addTimelineRow(
 
     time.lineLimit = 1;
     time.minimumScaleFactor = 0.75;
-
-    time.textColor =
-      Color.dynamic(
-        new Color(COLORS.inkFaint),
-        new Color('#7D8590')
-      );
+    time.textColor = reminderTextColor(item);
   }
 
   row.addSpacer(
-    compact ? 2 : 3
+    compact ? 3 : 4
   );
 
   const title =
@@ -1069,49 +1067,58 @@ function reminderTime(item) {
 
 
 // ============================================================
-// REMINDER ACCENT
+// REMINDER ACCENT — same color as Dashboard / Google Calendar
 // ============================================================
 
+function reminderAccentHex(item) {
+
+  const value = String(
+    item && (
+      item.color ||
+      item.personalOSColor
+    ) ||
+    COLORS.blue
+  ).trim();
+
+  return /^#[0-9a-f]{6}$/i.test(value)
+    ? value
+    : COLORS.blue;
+}
+
+
 function reminderAccent(item) {
+  return new Color(
+    reminderAccentHex(item)
+  );
+}
 
-  if (
-    !item ||
-    !item.start
-  ) {
-    return new Color(COLORS.blue);
-  }
 
-  const d =
-    new Date(item.start);
+function reminderTextColor(item) {
 
-  if (isNaN(d.getTime())) {
-    return new Color(COLORS.blue);
-  }
+  const color =
+    reminderAccentHex(item);
 
-  const now =
-    new Date();
+  const r =
+    parseInt(color.slice(1, 3), 16);
 
-  const diffDays =
+  const g =
+    parseInt(color.slice(3, 5), 16);
+
+  const b =
+    parseInt(color.slice(5, 7), 16);
+
+  const luminance =
     (
-      d.getTime() -
-      now.getTime()
-    ) /
-    86400000;
+      r * 299 +
+      g * 587 +
+      b * 114
+    ) / 1000;
 
-  if (
-    sameCalendarDay(
-      d,
-      now
-    )
-  ) {
-    return new Color(COLORS.red);
-  }
-
-  if (diffDays <= 7) {
-    return new Color(COLORS.amber);
-  }
-
-  return new Color(COLORS.blue);
+  return new Color(
+    luminance > 160
+      ? COLORS.ink
+      : '#FFFFFF'
+  );
 }
 
 

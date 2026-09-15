@@ -173,6 +173,20 @@ async function proxyGoogle(request, env) {
 
   const tokenResult = await validAccessToken(session, env);
   if (!tokenResult) return json({ error: 'Sessione Google scaduta.' }, 401, { 'Set-Cookie': clearCookie(SESSION_COOKIE) });
+
+  if (request.method === 'GET' && isSharedCalendarEventsTarget(target)) {
+    const data = await mergedCalendarEvents(target, tokenResult.session.accessToken);
+    const responseHeaders = new Headers({
+      'Content-Type': 'application/json; charset=utf-8',
+      'Cache-Control': 'no-store'
+    });
+    if (tokenResult.refreshed) {
+      const updated = await encryptJson(tokenResult.session, env.SESSION_SECRET);
+      responseHeaders.append('Set-Cookie', cookie(SESSION_COOKIE, updated, SESSION_MAX_AGE));
+    }
+    return new Response(JSON.stringify(data), { status: 200, headers: responseHeaders });
+  }
+
   const headers = new Headers();
   headers.set('Authorization', `Bearer ${tokenResult.session.accessToken}`);
   const contentType = request.headers.get('Content-Type');
@@ -196,6 +210,61 @@ async function proxyGoogle(request, env) {
     responseHeaders.append('Set-Cookie', cookie(SESSION_COOKIE, updated, SESSION_MAX_AGE));
   }
   return new Response(googleResponse.body, { status: googleResponse.status, headers: responseHeaders });
+}
+
+function isSharedCalendarEventsTarget(target) {
+  if (target.origin !== 'https://www.googleapis.com') return false;
+  let pathname;
+  try { pathname = decodeURIComponent(target.pathname); } catch { return false; }
+  return pathname === `/calendar/v3/calendars/${CALENDAR_ID}/events`;
+}
+
+async function mergedCalendarEvents(sharedTarget, accessToken) {
+  const personalTarget = new URL(sharedTarget.toString());
+  personalTarget.pathname = '/calendar/v3/calendars/primary/events';
+
+  const [shared, personal] = await Promise.all([
+    calendarApiJson(sharedTarget, accessToken),
+    calendarApiJson(personalTarget, accessToken)
+  ]);
+
+  const maxResults = Math.max(1, Math.min(Number(sharedTarget.searchParams.get('maxResults')) || 250, 2500));
+  const seen = new Set();
+  const items = [];
+
+  for (const event of [...(shared.items || []), ...(personal.items || [])]) {
+    const start = event?.start?.dateTime || event?.start?.date || '';
+    const key = event?.iCalUID
+      ? `ical:${event.iCalUID}|${start}`
+      : `event:${event?.id || ''}|${start}|${event?.summary || ''}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    items.push(event);
+  }
+
+  items.sort((a, b) => calendarEventStartValue(a) - calendarEventStartValue(b));
+  const result = { ...shared, items: items.slice(0, maxResults) };
+  delete result.nextPageToken;
+  return result;
+}
+
+async function calendarApiJson(url, accessToken) {
+  const response = await fetch(url.toString(), {
+    headers: { Authorization: `Bearer ${accessToken}` }
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const message = body?.error?.message || `Google Calendar HTTP ${response.status}`;
+    throw new HttpError(response.status, message);
+  }
+  return body;
+}
+
+function calendarEventStartValue(event) {
+  const raw = event?.start?.dateTime || event?.start?.date;
+  if (!raw) return Number.MAX_SAFE_INTEGER;
+  const value = Date.parse(raw);
+  return Number.isNaN(value) ? Number.MAX_SAFE_INTEGER : value;
 }
 
 async function validAccessToken(session, env) {

@@ -9,6 +9,7 @@ import {
   injectDashboardDefaults,
   isDashboardPath
 } from './dashboard-defaults.js';
+import { handleTodoCompletedApi } from './todo-completed-api.js';
 
 export default {
   async fetch(request, env, ctx) {
@@ -36,6 +37,21 @@ export default {
       } catch (error) {
         console.error('Finance API error', error);
         return withSecurityHeaders(new Response(JSON.stringify({ error: 'Errore interno Finance.' }), {
+          status: 500,
+          headers: {
+            'Content-Type': 'application/json; charset=utf-8',
+            'Cache-Control': 'private, no-store'
+          }
+        }));
+      }
+    }
+
+    if (url.pathname === '/api/todo-completed') {
+      try {
+        return withSecurityHeaders(await handleTodoCompletedApi(request, env));
+      } catch (error) {
+        console.error('Completed ToDo API error', error);
+        return withSecurityHeaders(new Response(JSON.stringify({ error: 'Errore interno Completed.' }), {
           status: 500,
           headers: {
             'Content-Type': 'application/json; charset=utf-8',

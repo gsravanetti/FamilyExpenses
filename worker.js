@@ -1,37 +1,52 @@
 const SESSION_COOKIE = 'personal_os_session';
 const OAUTH_COOKIE = 'personal_os_oauth';
 const SESSION_MAX_AGE = 60 * 60 * 24 * 180;
+const MAX_PROXY_BODY = 64 * 1024;
+const TODO_SPREADSHEET_ID = '1E6Lod_d0D0wOv3mrIErpSt9t5ntexGEnW-Ka0e4RXY0';
+const CALENDAR_ID = 'f63j9gnmsr08t755hj5s9b8ulo@group.calendar.google.com';
+
+class HttpError extends Error {
+  constructor(status, message) {
+    super(message);
+    this.status = status;
+  }
+}
 
 export default {
   async fetch(request, env) {
+    let response;
     try {
       const url = new URL(request.url);
 
-      if (url.pathname === '/api/auth/login' && request.method === 'GET') {
-        return await startLogin(request, env);
-      }
-      if (url.pathname === '/api/auth/callback' && request.method === 'GET') {
-        return await finishLogin(request, env);
-      }
-      if (url.pathname === '/api/auth/session' && request.method === 'GET') {
-        return await sessionStatus(request, env);
-      }
-      if (url.pathname === '/api/auth/logout' && request.method === 'POST') {
+      if (url.protocol !== 'https:') {
+        url.protocol = 'https:';
+        response = new Response(null, {
+          status: 308,
+          headers: { Location: url.toString(), 'Cache-Control': 'no-store' }
+        });
+      } else if (url.pathname === '/api/auth/login' && request.method === 'GET') {
+        response = await startLogin(request, env);
+      } else if (url.pathname === '/api/auth/callback' && request.method === 'GET') {
+        response = await finishLogin(request, env);
+      } else if (url.pathname === '/api/auth/session' && request.method === 'GET') {
+        response = await sessionStatus(request, env);
+      } else if (url.pathname === '/api/auth/logout' && request.method === 'POST') {
         requireSameOrigin(request);
-        return await logout(request, env);
+        response = await logout(request, env);
+      } else if (url.pathname === '/api/google') {
+        response = await proxyGoogle(request, env);
+      } else if (url.pathname.startsWith('/api/')) {
+        response = json({ error: 'Endpoint non trovato.' }, 404);
+      } else {
+        response = await env.ASSETS.fetch(request);
       }
-      if (url.pathname === '/api/google') {
-        return await proxyGoogle(request, env);
-      }
-      if (url.pathname.startsWith('/api/')) {
-        return json({ error: 'Endpoint non trovato.' }, 404);
-      }
-
-      return await env.ASSETS.fetch(request);
     } catch (error) {
-      console.error(error);
-      return json({ error: error instanceof Error ? error.message : 'Errore interno.' }, 500);
+      if (!(error instanceof HttpError)) console.error(error);
+      response = error instanceof HttpError
+        ? json({ error: error.message }, error.status)
+        : json({ error: 'Errore interno.' }, 500);
     }
+    return withSecurityHeaders(response);
   }
 };
 
@@ -61,7 +76,8 @@ async function startLogin(request, env) {
     status: 302,
     headers: {
       Location: `https://accounts.google.com/o/oauth2/v2/auth?${params}`,
-      'Set-Cookie': cookie(OAUTH_COOKIE, oauthPayload, 600)
+      'Set-Cookie': cookie(OAUTH_COOKIE, oauthPayload, 600),
+      'Cache-Control': 'no-store'
     }
   });
 }
@@ -115,7 +131,7 @@ async function finishLogin(request, env) {
     createdAt: Date.now()
   }, env.SESSION_SECRET);
 
-  const headers = new Headers({ Location: safeReturnTo(oauth.returnTo) });
+  const headers = new Headers({ Location: safeReturnTo(oauth.returnTo), 'Cache-Control': 'no-store' });
   headers.append('Set-Cookie', cookie(SESSION_COOKIE, sessionValue, SESSION_MAX_AGE));
   headers.append('Set-Cookie', clearCookie(OAUTH_COOKIE));
   return new Response(null, { status: 302, headers });
@@ -136,11 +152,16 @@ async function logout(request, env) {
       body: new URLSearchParams({ token: session.refreshToken })
     }).catch(() => {});
   }
-  return new Response(null, { status: 204, headers: { 'Set-Cookie': clearCookie(SESSION_COOKIE) } });
+  return new Response(null, {
+    status: 204,
+    headers: { 'Set-Cookie': clearCookie(SESSION_COOKIE), 'Cache-Control': 'no-store' }
+  });
 }
 
 async function proxyGoogle(request, env) {
-  if (!['GET', 'POST', 'PUT', 'PATCH', 'DELETE'].includes(request.method)) return json({ error: 'Metodo non consentito.' }, 405);
+  if (!['GET', 'POST', 'PUT'].includes(request.method)) {
+    return json({ error: 'Metodo non consentito.' }, 405, { Allow: 'GET, POST, PUT' });
+  }
   if (request.method !== 'GET') requireSameOrigin(request);
   const session = await getSession(request, env);
   if (!session || !allowedEmails(env).has(session.email)) return json({ error: 'Sessione non valida.' }, 401);
@@ -148,9 +169,7 @@ async function proxyGoogle(request, env) {
   const targetText = new URL(request.url).searchParams.get('url');
   let target;
   try { target = new URL(targetText); } catch { return json({ error: 'URL Google non valido.' }, 400); }
-  const calendarAllowed = target.protocol === 'https:' && target.hostname === 'www.googleapis.com' && target.pathname.startsWith('/calendar/v3/');
-  const sheetsAllowed = target.protocol === 'https:' && target.hostname === 'sheets.googleapis.com' && target.pathname.startsWith('/v4/spreadsheets/');
-  if (!calendarAllowed && !sheetsAllowed) return json({ error: 'API Google non consentita.' }, 403);
+  if (!isAllowedGoogleTarget(target, request.method)) return json({ error: 'API Google non consentita.' }, 403);
 
   const tokenResult = await validAccessToken(session, env);
   if (!tokenResult) return json({ error: 'Sessione Google scaduta.' }, 401, { 'Set-Cookie': clearCookie(SESSION_COOKIE) });
@@ -159,7 +178,13 @@ async function proxyGoogle(request, env) {
   const contentType = request.headers.get('Content-Type');
   if (contentType) headers.set('Content-Type', contentType);
   const init = { method: request.method, headers };
-  if (!['GET', 'HEAD'].includes(request.method)) init.body = await request.arrayBuffer();
+  if (request.method !== 'GET') {
+    const declaredSize = Number(request.headers.get('Content-Length') || 0);
+    if (declaredSize > MAX_PROXY_BODY) return json({ error: 'Richiesta troppo grande.' }, 413);
+    const body = await request.arrayBuffer();
+    if (body.byteLength > MAX_PROXY_BODY) return json({ error: 'Richiesta troppo grande.' }, 413);
+    init.body = body;
+  }
 
   const googleResponse = await fetch(target.toString(), init);
   const responseHeaders = new Headers();
@@ -211,12 +236,43 @@ function allowedEmails(env) {
 function requireSameOrigin(request) {
   const origin = request.headers.get('Origin');
   const expected = new URL(request.url).origin;
-  if (origin && origin !== expected) throw new Error('Origine della richiesta non valida.');
+  if (!origin || origin !== expected) throw new HttpError(403, 'Origine della richiesta non valida.');
 }
 
 function safeReturnTo(value) {
   const path = String(value || '/');
-  return path.startsWith('/') && !path.startsWith('//') ? path : '/';
+  if (!path.startsWith('/') || path.startsWith('//') || /[\\\u0000-\u001f\u007f]/.test(path)) return '/';
+  try {
+    const parsed = new URL(path, 'https://app.invalid');
+    return parsed.origin === 'https://app.invalid'
+      ? `${parsed.pathname}${parsed.search}${parsed.hash}`
+      : '/';
+  } catch {
+    return '/';
+  }
+}
+
+function isAllowedGoogleTarget(target, method) {
+  if (target.username || target.password || target.port) return false;
+  let pathname;
+  try { pathname = decodeURIComponent(target.pathname); } catch { return false; }
+
+  const calendarPath = `/calendar/v3/calendars/${CALENDAR_ID}/events`;
+  if (target.origin === 'https://www.googleapis.com') {
+    return pathname === calendarPath && (method === 'GET' || method === 'POST');
+  }
+
+  if (target.origin !== 'https://sheets.googleapis.com') return false;
+  const sheetBase = `/v4/spreadsheets/${TODO_SPREADSHEET_ID}`;
+  if (pathname === sheetBase) return method === 'GET';
+  if (pathname === `${sheetBase}:batchUpdate`) return method === 'POST';
+  const valuesPrefix = `${sheetBase}/values/`;
+  if (!pathname.startsWith(valuesPrefix)) return false;
+  const range = pathname.slice(valuesPrefix.length);
+  const rangeMatch = /^(ToDo|ReminderDone)![A-D][0-9]*:[A-D][0-9]*(:append)?$/.exec(range);
+  if (!rangeMatch) return false;
+  if (method === 'GET' || method === 'PUT') return !rangeMatch[2];
+  return method === 'POST' && Boolean(rangeMatch[2]);
 }
 
 function readCookie(request, name) {
@@ -291,6 +347,24 @@ function htmlError(message, status) {
   });
 }
 
+function withSecurityHeaders(response) {
+  const headers = new Headers(response.headers);
+  headers.set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  headers.set('X-Content-Type-Options', 'nosniff');
+  headers.set('X-Frame-Options', 'DENY');
+  headers.set('Content-Security-Policy', "frame-ancestors 'none'");
+  headers.set('Referrer-Policy', 'no-referrer');
+  headers.set('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  headers.set('X-Robots-Tag', 'noindex, nofollow');
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers
+  });
+}
+
 function escapeHtml(value) {
   return String(value).replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
 }
+
+export { safeReturnTo, isAllowedGoogleTarget, requireSameOrigin, withSecurityHeaders };

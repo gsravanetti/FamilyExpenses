@@ -1,0 +1,13 @@
+{
+  "name": "family-expenses-worker",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test",
+    "deploy": "wrangler deploy --secrets-file .secrets.json"
+  },
+  "devDependencies": {
+    "wrangler": "4.131.2"
+  }
+}

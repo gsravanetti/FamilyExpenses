@@ -1,9 +1,14 @@
 .git/
 .gitignore
 .assetsignore
+.wrangler*/
 worker.js
+worker-entry.js
+widget.js
 wrangler.jsonc
 prepare-secrets.mjs
 .secrets.json
+package*.json
+test/
 README*
 node_modules/

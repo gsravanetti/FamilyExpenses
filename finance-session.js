@@ -11,6 +11,42 @@
     window.location.href = '/api/auth/login?returnTo=' + encodeURIComponent(currentReturnTo());
   }
 
+  function recapState() {
+    return window.App && App._state ? App._state : null;
+  }
+
+  function setDefaultRecapSort() {
+    var state = recapState();
+    if (!state) return;
+    state.recapSortKey = 'scarto';
+    state.recapSortDir = -1;
+  }
+
+  function scheduleRecapDefaults(previousModel) {
+    var attempts = 0;
+
+    function waitForFreshModel() {
+      var state = recapState();
+      if (state && state.model && state.model !== previousModel) {
+        // Recap: all'apertura mostra solo il mese corrente.
+        state.mesi = [new Date().getMonth() + 1];
+        // Tabella varianze: ordinamento iniziale dal Var più alto al più basso.
+        state.recapSortKey = 'scarto';
+        state.recapSortDir = -1;
+
+        // Ridisegna il Recap dopo che applicaModello() ha impostato i suoi default.
+        var recapButton = document.querySelector('#nav button[data-v="recap"]');
+        if (recapButton) recapButton.click();
+        return;
+      }
+
+      attempts += 1;
+      if (attempts < 200) setTimeout(waitForFreshModel, 50);
+    }
+
+    setTimeout(waitForFreshModel, 0);
+  }
+
   function sessionStatus() {
     return fetch('/api/auth/session', {
       method: 'GET',
@@ -155,6 +191,10 @@
     }
   };
 
+  // Imposta il sort prima del primo draw; il filtro mese viene applicato
+  // appena il nuovo modello dati è stato effettivamente caricato.
+  setDefaultRecapSort();
+
   document.addEventListener('DOMContentLoaded', function () {
     var login = document.getElementById('btnLogin');
     var reload = document.getElementById('btnReload');
@@ -177,7 +217,11 @@
 
     if (reload) {
       reload.addEventListener('click', function (ev) {
-        if (sessionAuthenticated) return;
+        if (sessionAuthenticated) {
+          var state = recapState();
+          scheduleRecapDefaults(state ? state.model : null);
+          return;
+        }
         ev.preventDefault();
         ev.stopImmediatePropagation();
         sharedLogin();
@@ -199,7 +243,11 @@
       login.disabled = false;
       reload.disabled = false;
       logout.disabled = false;
+      setDefaultRecapSort();
+      var state = recapState();
+      var previousModel = state ? state.model : null;
       login.click();
+      scheduleRecapDefaults(previousModel);
       login.disabled = true;
     });
   });

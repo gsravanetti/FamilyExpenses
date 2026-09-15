@@ -204,11 +204,10 @@ function buildError(widget, message) {
   body.textColor = Color.dynamic(new Color(COLORS.inkSoft), new Color('#AAAAAA'));
 }
 
-// iOS widgets are static, not scrollable. Show as many rows as fit by family.
 function maxVisibleRows(kind) {
   const family = config.widgetFamily || 'medium';
   if (family === 'large') return kind === 'todo' ? 10 : 10;
-  if (family === 'small') return kind === 'todo' ? 5 : 4;
+  if (family === 'small') return kind === 'todo' ? 5 : 5;
   return kind === 'todo' ? 6 : 5;
 }
 
@@ -273,7 +272,7 @@ function addTimelineRow(widget, item, isLast) {
   const compact = (config.widgetFamily || 'medium') === 'small';
   const row = widget.addStack();
   row.layoutHorizontally();
-  row.centerAlignContent();
+  row.topAlignContent();
   row.size = new Size(0, compact ? 23 : 27);
 
   const rail = row.addStack();
@@ -320,16 +319,16 @@ function addTimelineRow(widget, item, isLast) {
 
   const title = row.addText(String(item.title || ''));
   title.font = Font.semiboldSystemFont(compact ? 9.4 : 10.5);
-  title.lineLimit = compact ? 1 : 2;
-  title.minimumScaleFactor = 0.68;
+  title.lineLimit = 2;
+  title.minimumScaleFactor = 0.72;
   title.textColor = Color.dynamic(new Color(COLORS.ink), Color.white());
 }
 
 function addMoreRow(widget, remaining) {
   if (remaining <= 0) return;
-  widget.addSpacer((config.widgetFamily || 'medium') === 'small' ? 2 : 4);
+  widget.addSpacer((config.widgetFamily || 'medium') === 'small' ? 1 : 4);
   const more = widget.addText(`+ ${remaining} altri`);
-  more.font = Font.semiboldSystemFont((config.widgetFamily || 'medium') === 'small' ? 8.3 : 9);
+  more.font = Font.semiboldSystemFont((config.widgetFamily || 'medium') === 'small' ? 8.1 : 9);
   more.lineLimit = 1;
   more.textColor = new Color(COLORS.blue);
 }

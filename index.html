@@ -6,9 +6,8 @@
 <meta name="theme-color" content="#F4F7FF">
 <meta name="color-scheme" content="light">
 <meta name="description" content="Dashboard personale per reminder, to do e finanza familiare.">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'self'; object-src 'none'; form-action 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline' https://accounts.google.com; connect-src 'self' https://accounts.google.com https://sheets.googleapis.com https://www.googleapis.com https://calendar.googleapis.com; frame-src https://accounts.google.com">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'self'; object-src 'none'; form-action 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self'; frame-src 'none'">
 <title>Dashboard personale</title>
-<script src="https://accounts.google.com/gsi/client" async defer></script>
 <style>
 :root{
   --bg:#F4F7FF;--surface:#FFFFFF;--surface-2:#F8FAFF;--line:#E5EAF3;--line-strong:#D8E0EC;
@@ -215,23 +214,18 @@ body{padding-bottom:38px}button,input,textarea,select{font:inherit;color:inherit
 /* ==========================================================================
    CONFIGURAZIONE
    - Finance resta totalmente separata e NON usa questa configurazione.
-   - Il client OAuth è lo stesso; i To do usano uno Spreadsheet dedicato.
-   - La dashboard richiede però scope di scrittura per Calendar e Sheets.
-   - Gli account autorizzati NON sono nel codice: vengono gestiti nel progetto OAuth Google Cloud.
+   - Il login e i token Google sono gestiti dal Worker Cloudflare.
+   - I To do usano uno Spreadsheet dedicato.
+   - Gli account autorizzati sono configurati come Secret in Cloudflare.
    ========================================================================== */
 var CONFIG = {
-clientId: '177628124658-c9km173ch1v1ph1akoqvmapjgpo1pt0s.apps.googleusercontent.com',
   spreadsheetId: '1E6Lod_d0D0wOv3mrIErpSt9t5ntexGEnW-Ka0e4RXY0',
   todoSheet: 'ToDo',
   doneSheet: 'ReminderDone',
-  calendarId: 'f63j9gnmsr08t755hj5s9b8ulo@group.calendar.google.com',
-  scope: [
-    'https://www.googleapis.com/auth/calendar.events',
-    'https://www.googleapis.com/auth/spreadsheets'
-  ].join(' ')
+  calendarId: 'f63j9gnmsr08t755hj5s9b8ulo@group.calendar.google.com'
 };
 
-var State = { token:null, tokenClient:null, calendarId:CONFIG.calendarId, metadata:null, loading:false };
+var State = { authenticated:false, calendarId:CONFIG.calendarId, metadata:null, loading:false };
 var $=function(id){return document.getElementById(id);};
 
 function toast(msg){var el=$('toast');el.textContent=msg;el.classList.remove('hidden');clearTimeout(toast._t);toast._t=setTimeout(function(){el.classList.add('hidden');},2800);}
@@ -249,12 +243,36 @@ function hideGate(){
   $('appShell').classList.remove('app-locked');
 }
 
-function waitGoogle(){return new Promise(function(resolve,reject){var n=0;(function poll(){if(window.google&&google.accounts&&google.accounts.oauth2)return resolve();if(++n>100)return reject(new Error('Google Identity Services non disponibile.'));setTimeout(poll,80);})();});}
-function initAuth(){return waitGoogle().then(function(){State.tokenClient=google.accounts.oauth2.initTokenClient({client_id:CONFIG.clientId,scope:CONFIG.scope,callback:function(resp){if(resp.error){toast('Accesso Google non riuscito.');showGate();return;}State.token=resp.access_token;hideGate();setLoggedIn(true);afterLogin();}});});}
-function login(){if(!State.tokenClient){toast('Servizio Google non ancora pronto.');return;}State.tokenClient.requestAccessToken({prompt:'select_account'});}
-function logout(){if(State.token&&window.google&&google.accounts&&google.accounts.oauth2){google.accounts.oauth2.revoke(State.token,function(){});}State.token=null;setLoggedIn(false);renderEmpty('Accedi per caricare i dati.');showGate();}
+function initAuth(){
+  return fetch('/api/auth/session',{credentials:'same-origin'}).then(function(r){
+    if(!r.ok)throw new Error('Impossibile verificare la sessione.');
+    return r.json();
+  }).then(function(session){
+    State.authenticated=!!session.authenticated;
+    setLoggedIn(State.authenticated);
+    if(State.authenticated){hideGate();return afterLogin();}
+    showGate();
+  });
+}
+function login(){window.location.href='/api/auth/login?returnTo=/';}
+function logout(){
+  return fetch('/api/auth/logout',{method:'POST',credentials:'same-origin'}).finally(function(){
+    State.authenticated=false;
+    setLoggedIn(false);
+    renderEmpty('Accedi per caricare i dati.');
+    showGate();
+  });
+}
 
-function api(url,options){options=options||{};options.headers=Object.assign({'Authorization':'Bearer '+State.token,'Content-Type':'application/json'},options.headers||{});return fetch(url,options).then(function(r){if(r.status===401){State.token=null;setLoggedIn(false);throw new Error('Sessione Google scaduta: accedi di nuovo.');}return r.text().then(function(t){var body=t?JSON.parse(t):{};if(!r.ok)throw new Error((body.error&&body.error.message)||('Errore HTTP '+r.status));return body;});});}
+function api(url,options){
+  options=options||{};
+  var proxyOptions=Object.assign({},options,{credentials:'same-origin'});
+  proxyOptions.headers=Object.assign({'Content-Type':'application/json'},options.headers||{});
+  return fetch('/api/google?url='+encodeURIComponent(url),proxyOptions).then(function(r){
+    if(r.status===401){State.authenticated=false;setLoggedIn(false);showGate();throw new Error('Sessione Google scaduta: accedi di nuovo.');}
+    return r.text().then(function(t){var body=t?JSON.parse(t):{};if(!r.ok)throw new Error((body.error&&body.error.message)||body.error||('Errore HTTP '+r.status));return body;});
+  });
+}
 
 /* ---------- Calendar ------------------------------------------------------ */
 function eventDate(ev){var raw=ev.start&&(ev.start.dateTime||ev.start.date);return raw?new Date(raw):null;}
@@ -298,7 +316,7 @@ function renderEmpty(msg){$('remList').innerHTML='<div class="empty"><div class=
 function renderReminders(items){if(!items.length){$('remList').innerHTML='<div class="empty"><div class="empty-glyph">◷</div>Nessun reminder aperto.</div>';return;}$('remList').innerHTML=items.map(function(ev){var d=eventDate(ev);var sub=(d?d.toLocaleDateString('it-IT',{weekday:'short',day:'2-digit',month:'long'}):'')+(ev.description?' · '+ev.description:'');return '<div class="item"><button class="check" data-remdone="'+esc(ev.id)+'" aria-label="Segna fatto"></button><div class="item-main"><div class="item-title">'+esc(ev.summary||'(Senza titolo)')+'</div><div class="item-sub">'+esc(sub)+'</div></div><span class="when '+eventClass(ev)+'">'+esc(eventWhen(ev))+'</span></div>';}).join('');Array.prototype.forEach.call($('remList').querySelectorAll('[data-remdone]'),function(b){b.addEventListener('click',function(){var id=b.getAttribute('data-remdone');b.classList.add('busy');b.disabled=true;completeReminder(id).then(function(){b.closest('.item').remove();toast('Reminder completato. L\'evento resta in Calendar.');}).catch(function(e){b.classList.remove('busy');b.disabled=false;toast(e.message);});});});}
 function renderTodos(items){if(!items.length){$('todoList').innerHTML='<div class="empty"><div class="empty-glyph">✓</div>Nessun To do aperto.</div>';return;}$('todoList').innerHTML=items.map(function(td){return '<div class="item"><button class="check" data-tododone="'+td.row+'" aria-label="Segna fatto"></button><div class="item-main"><div class="item-title">'+esc(td.title)+'</div><div class="item-sub">'+esc(td.note||'Creato '+(td.createdAt?new Date(td.createdAt).toLocaleDateString('it-IT'):'') )+'</div></div><span class="when">To do</span></div>';}).join('');Array.prototype.forEach.call($('todoList').querySelectorAll('[data-tododone]'),function(b){b.addEventListener('click',function(){var row=+b.getAttribute('data-tododone');var prop=findSheet(State.metadata,CONFIG.todoSheet);if(!prop){toast('Foglio ToDo non trovato.');return;}b.classList.add('busy');b.disabled=true;deleteRow(prop.sheetId,row).then(function(){toast('To do eliminato dal Google Sheet.');return refreshAll();}).catch(function(e){b.classList.remove('busy');b.disabled=false;toast(e.message);});});});}
 function refreshAll(){
-  if(!State.token){renderEmpty('Accedi per caricare i dati.');return Promise.resolve();}
+  if(!State.authenticated){renderEmpty('Accedi per caricare i dati.');return Promise.resolve();}
   if(State.loading)return Promise.resolve();
   State.loading=true;
   status('Aggiornamento…',true);
@@ -326,7 +344,7 @@ function afterLogin(){refreshAll();}
 function openQuick(type){$('quickOverlay').classList.remove('hidden');document.body.style.overflow='hidden';resetQuick();if(type)selectType(type);}
 function closeQuick(){$('quickOverlay').classList.add('hidden');document.body.style.overflow='';}
 function resetQuick(){$('typePicker').classList.remove('hidden');$('reminderFormWrap').classList.add('hidden');$('todoFormWrap').classList.add('hidden');$('quickTitle').textContent='Cosa vuoi aggiungere?';$('reminderForm').reset();$('todoForm').reset();todayDefaults();}
-function selectType(t){if(!State.token){closeQuick();login();return;}$('typePicker').classList.add('hidden');$('reminderFormWrap').classList.toggle('hidden',t!=='reminder');$('todoFormWrap').classList.toggle('hidden',t!=='todo');$('quickTitle').textContent=t==='reminder'?'Nuovo Reminder':'Nuovo To do';setTimeout(function(){(t==='reminder'?$('remTitle'):$('todoTitle')).focus();},30);}
+function selectType(t){if(!State.authenticated){closeQuick();login();return;}$('typePicker').classList.add('hidden');$('reminderFormWrap').classList.toggle('hidden',t!=='reminder');$('todoFormWrap').classList.toggle('hidden',t!=='todo');$('quickTitle').textContent=t==='reminder'?'Nuovo Reminder':'Nuovo To do';setTimeout(function(){(t==='reminder'?$('remTitle'):$('todoTitle')).focus();},30);}
 
 $('addReminderBtn').addEventListener('click',function(){openQuick('reminder');});$('addTodoBtn').addEventListener('click',function(){openQuick('todo');});$('closeQuick').addEventListener('click',closeQuick);$('quickOverlay').addEventListener('click',function(e){if(e.target===$('quickOverlay'))closeQuick();});Array.prototype.forEach.call(document.querySelectorAll('[data-back]'),function(b){b.addEventListener('click',resetQuick);});Array.prototype.forEach.call(document.querySelectorAll('[data-type]'),function(b){b.addEventListener('click',function(){selectType(b.getAttribute('data-type'));});});
 $('reminderForm').addEventListener('submit',function(e){e.preventDefault();var title=$('remTitle').value.trim();if(!title)return;var btn=e.submitter;btn.disabled=true;btn.innerHTML='<span class="spin"></span>Salvataggio…';createReminder(title,$('remDate').value,$('remTime').value,$('remNote').value.trim(),document.querySelector('input[name="remAudience"]:checked').value).then(function(){closeQuick();toast('Reminder salvato nel calendario condiviso.');return refreshAll();}).catch(function(err){toast(err.message);}).finally(function(){btn.disabled=false;btn.textContent='Salva nel calendario';});});
@@ -335,7 +353,7 @@ $('todoForm').addEventListener('submit',function(e){e.preventDefault();var title
 /* ---------- UI events ----------------------------------------------------- */
 $('globalLoginBtn').addEventListener('click',login);$('loginBtn').addEventListener('click',login);$('logoutBtn').addEventListener('click',logout);$('refreshBtn').addEventListener('click',function(){window.location.reload();});$('openFinance').addEventListener('click',function(){window.location.href='finance.html';});$('notesBtn').addEventListener('click',function(){toast('Note: funzione in sviluppo.');});document.addEventListener('keydown',function(e){if(e.key==='Escape')closeQuick();});
 
-showGate();renderEmpty('Accedi per caricare i dati.');todayDefaults();initAuth().catch(function(e){toast(e.message);});
+showGate();renderEmpty('Accedi per caricare i dati.');todayDefaults();initAuth().catch(function(e){toast(e.message);showGate();});
 })();
 </script>
 </body>

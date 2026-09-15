@@ -9,7 +9,15 @@ export async function handleTodoCompletedApi(request, env) {
   if (!['GET', 'POST'].includes(request.method)) {
     return json({ error: 'Metodo non consentito.' }, 405, { Allow: 'GET, POST' });
   }
-  if (request.method === 'POST') requireSameOrigin(request);
+  if (request.method === 'POST') {
+    try {
+      requireSameOrigin(request);
+    } catch (error) {
+      return json({ error: error.message }, Number(error.status) || 403);
+    }
+    const declaredSize = Number(request.headers.get('Content-Length') || 0);
+    if (declaredSize > 4096) return json({ error: 'Richiesta troppo grande.' }, 413);
+  }
 
   const session = await getSession(request, env);
   if (!session || !allowedEmails(env).has(session.email)) {

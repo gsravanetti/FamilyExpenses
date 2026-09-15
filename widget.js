@@ -31,7 +31,7 @@ export async function handleWidget(request, env) {
 
   const [todoData, reminderData, financeData] = await Promise.all([
     loadTodos(accessToken),
-    loadReminders(accessToken),
+    loadReminders(accessToken, env),
     loadFinance(accessToken)
   ]);
 
@@ -84,7 +84,7 @@ async function loadTodos(accessToken) {
   };
 }
 
-async function loadReminders(accessToken) {
+async function loadReminders(accessToken, env) {
   const doneRows = await sheetValues(accessToken, TODO_SPREADSHEET_ID, `${REMINDER_DONE_SHEET}!A2:B`);
   const done = new Set(doneRows.map(row => String(row[0] || '')).filter(Boolean));
 
@@ -99,9 +99,23 @@ async function loadReminders(accessToken) {
     timeMax: future.toISOString()
   });
 
-  const url = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(CALENDAR_ID)}/events?${params}`;
-  const data = await googleJson(url, accessToken);
-  const visible = (data.items || [])
+  const sharedUrl = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(CALENDAR_ID)}/events?${params}`;
+  const shared = await googleJson(sharedUrl, accessToken);
+
+  const personalId = personalCalendarId(env);
+  let personal = { items: [] };
+  let personalConnected = false;
+  if (personalId && personalId !== CALENDAR_ID) {
+    const personalUrl = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(personalId)}/events?${params}`;
+    try {
+      personal = await googleJson(personalUrl, accessToken);
+      personalConnected = true;
+    } catch (error) {
+      console.warn(`Personal calendar unavailable for widget: ${String(error?.message || error)}`);
+    }
+  }
+
+  const visible = mergeCalendarItems(shared.items || [], personal.items || [])
     .filter(event => event.status !== 'cancelled' && event.id && !done.has(event.id))
     .map(event => ({
       id: event.id,
@@ -114,8 +128,44 @@ async function loadReminders(accessToken) {
 
   return {
     count: visible.length,
-    items: visible
+    items: visible,
+    sources: {
+      shared: true,
+      personal: personalConnected
+    }
   };
+}
+
+function personalCalendarId(env) {
+  const explicit = String(env.PERSONAL_CALENDAR_ID || '').trim();
+  if (explicit) return explicit;
+  return String(env.ALLOWED_EMAILS || '')
+    .split(',')
+    .map(value => value.trim().toLowerCase())
+    .find(Boolean) || '';
+}
+
+function mergeCalendarItems(sharedItems, personalItems) {
+  const seen = new Set();
+  const items = [];
+  for (const event of [...sharedItems, ...personalItems]) {
+    const start = event?.start?.dateTime || event?.start?.date || '';
+    const key = event?.iCalUID
+      ? `ical:${event.iCalUID}|${start}`
+      : `event:${event?.id || ''}|${start}|${event?.summary || ''}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    items.push(event);
+  }
+  items.sort((a, b) => calendarEventStartValue(a) - calendarEventStartValue(b));
+  return items;
+}
+
+function calendarEventStartValue(event) {
+  const raw = event?.start?.dateTime || event?.start?.date;
+  if (!raw) return Number.MAX_SAFE_INTEGER;
+  const value = Date.parse(raw);
+  return Number.isNaN(value) ? Number.MAX_SAFE_INTEGER : value;
 }
 
 async function loadFinance(accessToken) {

@@ -14,6 +14,7 @@ import {
 } from './dashboard-defaults.js';
 import { handleTodoCompletedApi } from './todo-completed-api.js';
 import { injectPwaIcons } from './pwa-icons.js';
+import { injectSportTile } from './sport-tile.js';
 
 export default {
   async fetch(request, env, ctx) {
@@ -82,7 +83,10 @@ export default {
 
     let response = await appWorker.fetch(request, env, ctx);
     if (isFinancePath(url.pathname)) response = injectFinanceSessionBridge(response);
-    if (isDashboardPath(url.pathname)) response = injectDashboardDefaults(response);
+    if (isDashboardPath(url.pathname)) {
+      response = injectDashboardDefaults(response);
+      response = injectSportTile(response);
+    }
     return injectPwaIcons(response, url.pathname);
   }
 };

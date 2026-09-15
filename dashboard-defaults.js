@@ -12,7 +12,10 @@ export function injectDashboardDefaults(response) {
     .on('body', {
       element(element) {
         element.append(
-          '<style id="personal-os-mobile-reminder-time">' +
+          '<style id="personal-os-dashboard-polish">' +
+          '#todoList .item-sub{display:none!important}' +
+          '#todoList .item{min-height:50px!important;padding-top:7px!important;padding-bottom:7px!important}' +
+          '#todoList .item-main{display:flex;align-items:center;min-height:32px}' +
           '@media(max-width:460px){' +
           '#remList .reminder-item .when,#hiddenRemList .reminder-item .when{' +
           'max-width:none!important;overflow:visible!important;text-overflow:clip!important;flex-shrink:0!important' +

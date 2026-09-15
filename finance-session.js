@@ -47,6 +47,94 @@
     setTimeout(waitForFreshModel, 0);
   }
 
+  function projectedRecapTotals() {
+    var state = recapState();
+    if (!state || state.view !== 'recap' || !state.model ||
+        !window.Model || typeof Model.monthlyIncomeVsSpese !== 'function') return null;
+
+    // Usa esattamente la stessa serie del grafico Recap: stipendio consuntivo
+    // quando disponibile, altrimenti stipendio atteso; spese actual nei mesi
+    // con dati, altrimenti budget per i mesi futuri/simulati.
+    var serie = Model.monthlyIncomeVsSpese(state.model, state.inclCantiere);
+    var mesi = state.mesi && state.mesi.length
+      ? state.mesi.slice()
+      : [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+    var stipendio = 0;
+    var spese = 0;
+
+    mesi.forEach(function (mese) {
+      var d = serie[mese - 1];
+      if (!d) return;
+      if (state.persona === 'jack') {
+        stipendio += Number(d.stipJack) || 0;
+        spese += Number(d.speseJack) || 0;
+      } else if (state.persona === 'otti') {
+        stipendio += Number(d.stipOtti) || 0;
+        spese += Number(d.speseOtti) || 0;
+      } else {
+        stipendio += (Number(d.stipJack) || 0) + (Number(d.stipOtti) || 0);
+        spese += (Number(d.speseJack) || 0) + (Number(d.speseOtti) || 0);
+      }
+    });
+
+    return {
+      stipendio: stipendio,
+      spese: spese,
+      saving: stipendio - spese,
+      nMesi: mesi.length
+    };
+  }
+
+  function refreshProjectedRecapKpis() {
+    var projected = projectedRecapTotals();
+    if (!projected || !window.Fmt) return;
+
+    var stipendioKpi = null;
+    var savingKpi = null;
+    Array.prototype.forEach.call(document.querySelectorAll('#views .kpi'), function (kpi) {
+      var label = kpi.querySelector('.k');
+      var text = label ? label.textContent : '';
+      if (text.indexOf('Stipendio (') === 0) stipendioKpi = kpi;
+      else if (text === 'Saving') savingKpi = kpi;
+    });
+
+    if (stipendioKpi) {
+      var stipendioValue = stipendioKpi.querySelector('.v');
+      if (stipendioValue) stipendioValue.textContent = Fmt.eur(projected.stipendio);
+    }
+
+    if (savingKpi) {
+      var savingValue = savingKpi.querySelector('.v');
+      var savingSub = savingKpi.querySelector('.s');
+      var savingMese = projected.nMesi ? projected.saving / projected.nMesi : 0;
+
+      if (savingValue) {
+        savingValue.textContent = Fmt.signed(projected.saving) + ' €' +
+          (projected.nMesi ? ' (' + Fmt.eur(savingMese) + '/mese)' : '');
+        savingValue.classList.remove('under', 'over');
+        savingValue.classList.add(projected.saving >= 0 ? 'under' : 'over');
+      }
+      if (savingSub) {
+        savingSub.textContent = projected.stipendio
+          ? Fmt.pct(projected.saving / projected.stipendio) + ' dello stipendio'
+          : '';
+      }
+    }
+  }
+
+  function observeRecapKpis() {
+    var views = document.getElementById('views');
+    if (!views || typeof MutationObserver !== 'function') return;
+    var timer = null;
+    var observer = new MutationObserver(function () {
+      clearTimeout(timer);
+      timer = setTimeout(refreshProjectedRecapKpis, 0);
+    });
+    // App.draw() ricrea i figli diretti di #views; non osserviamo il subtree
+    // così l'aggiornamento dei testi KPI non innesca un ciclo dell'observer.
+    observer.observe(views, { childList: true });
+  }
+
   function sessionStatus() {
     return fetch('/api/auth/session', {
       method: 'GET',
@@ -202,6 +290,8 @@
     var loaderText = document.querySelector('#loader > p');
     var hint = document.querySelector('#loader .hint');
     var loadMsg = document.getElementById('loadMsg');
+
+    observeRecapKpis();
 
     if (loaderText) loaderText.textContent = 'Le tue spese e il tuo budget, protetti dallo stesso accesso della dashboard.';
     if (hint) hint.textContent = 'L’accesso è condiviso con la dashboard principale. Se hai già effettuato il login su questo dispositivo, Finance si apre automaticamente senza chiederti di accedere di nuovo.';

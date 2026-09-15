@@ -161,13 +161,13 @@ function buildWidget(mode, result) {
   const widget = new ListWidget();
   const family = config.widgetFamily || 'medium';
   const compact = family === 'small';
-  const compactReminder = compact && mode === 'reminder';
 
+  // Più spazio utile: header quasi attaccato al bordo superiore e padding ridotti.
   widget.setPadding(
-    compactReminder ? 4 : (compact ? 6 : 10),
-    compactReminder ? 8 : (compact ? 10 : 13),
-    compactReminder ? 4 : (compact ? 6 : 10),
-    compactReminder ? 8 : (compact ? 10 : 13)
+    compact ? 2 : 4,
+    compact ? 6 : 8,
+    compact ? 3 : 5,
+    compact ? 6 : 8
   );
 
   widget.spacing = 0;
@@ -180,12 +180,8 @@ function buildWidget(mode, result) {
 
   widget.addSpacer(
     mode === 'finance'
-      ? 8
-      : compactReminder
-        ? 2
-        : compact
-          ? 3
-          : 5
+      ? 5
+      : 1
   );
 
   if (result.source === 'error') {
@@ -198,14 +194,12 @@ function buildWidget(mode, result) {
 
   if (mode === 'reminder') {
     buildReminder(widget, data.reminder || {});
-    widget.addSpacer();
     widget.url = compact ? makeRefreshUrl(mode) : CONFIG.baseUrl;
   } else if (mode === 'finance') {
     buildFinance(widget, data.finance || {});
     widget.url = CONFIG.financeUrl;
   } else {
     buildTodo(widget, data.todo || {});
-    widget.addSpacer();
     widget.url = compact ? makeRefreshUrl(mode) : CONFIG.baseUrl;
   }
 
@@ -215,24 +209,25 @@ function buildWidget(mode, result) {
 
 // ============================================================
 // HEADER
+// TASK / REMINDER: solo Refresh, centrato e più in alto possibile.
+// FINANCE: mantiene il titolo perché non ha il pulsante Refresh.
 // ============================================================
 
 function addHeader(widget, mode) {
   const compact = (config.widgetFamily || 'medium') === 'small';
-
   const row = widget.addStack();
   row.layoutHorizontally();
   row.centerAlignContent();
-  row.size = new Size(0, compact ? 24 : 27);
+  row.size = new Size(0, compact ? 20 : 22);
 
-  const titleText =
-    mode === 'finance'
-      ? 'FINANCE'
-      : mode === 'reminder'
-        ? 'REMINDER'
-        : 'TASK';
+  if (mode === 'todo' || mode === 'reminder') {
+    row.addSpacer();
+    addRefreshButton(row, mode);
+    row.addSpacer();
+    return;
+  }
 
-  const title = row.addText(titleText);
+  const title = row.addText('FINANCE');
   title.font = Font.semiboldSystemFont(compact ? 12 : 13);
   title.lineLimit = 1;
   title.minimumScaleFactor = 1;
@@ -240,12 +235,6 @@ function addHeader(widget, mode) {
     new Color(COLORS.ink),
     Color.white()
   );
-
-  row.addSpacer();
-
-  if (mode === 'todo' || mode === 'reminder') {
-    addRefreshButton(row, mode);
-  }
 }
 
 
@@ -262,13 +251,13 @@ function addRefreshButton(row, mode) {
   button.backgroundColor = new Color(COLORS.blue);
   button.cornerRadius = 7;
   button.size = new Size(
-    compact ? 69 : 79,
-    compact ? 23 : 25
+    compact ? 76 : 84,
+    compact ? 20 : 22
   );
   button.setPadding(
-    compact ? 3 : 4,
+    2,
     compact ? 5 : 6,
-    compact ? 3 : 4,
+    2,
     compact ? 5 : 6
   );
   button.url = makeRefreshUrl(mode);
@@ -283,7 +272,7 @@ function addRefreshButton(row, mode) {
   );
   image.tintColor = Color.white();
 
-  button.addSpacer(compact ? 3 : 4);
+  button.addSpacer(3);
 
   const label = button.addText('REFRESH');
   label.font = Font.boldSystemFont(compact ? 8.2 : 9);
@@ -314,7 +303,7 @@ function buildError(widget, message) {
     Color.white()
   );
 
-  widget.addSpacer(7);
+  widget.addSpacer(5);
 
   const body = widget.addText(
     String(message || 'Errore sconosciuto')
@@ -336,15 +325,9 @@ function buildError(widget, message) {
 function maxVisibleRows(kind) {
   const family = config.widgetFamily || 'medium';
 
-  if (family === 'large') {
-    return kind === 'todo' ? 8 : 8;
-  }
-
-  if (family === 'small') {
-    return kind === 'todo' ? 4 : 4;
-  }
-
-  return kind === 'todo' ? 4 : 4;
+  if (family === 'large') return 9;
+  if (family === 'small') return 5;
+  return 5;
 }
 
 
@@ -364,11 +347,14 @@ function buildTodo(widget, todo) {
   items.forEach((item, index) => {
     addTaskRow(widget, item);
     if (index < items.length - 1) {
-      widget.addSpacer(4);
+      widget.addSpacer(2);
     }
   });
 
-  addMoreRow(widget, all.length - items.length);
+  // Nel widget piccolo privilegiamo un task reale rispetto alla riga “+ N altri”.
+  if ((config.widgetFamily || 'medium') !== 'small') {
+    addMoreRow(widget, all.length - items.length);
+  }
 }
 
 function addTaskRow(widget, item) {
@@ -377,12 +363,13 @@ function addTaskRow(widget, item) {
   const row = widget.addStack();
   row.layoutHorizontally();
   row.topAlignContent();
-  row.size = new Size(0, compact ? 29 : 31);
 
+  // Nessuna altezza fissa: una riga usa solo lo spazio che serve;
+  // un titolo lungo può crescere fino a due righe.
   const mark = row.addStack();
   mark.size = new Size(
-    compact ? 16 : 17,
-    compact ? 16 : 17
+    compact ? 15 : 16,
+    compact ? 15 : 16
   );
   mark.cornerRadius = 5;
   mark.backgroundColor = new Color(COLORS.blue);
@@ -395,16 +382,12 @@ function addTaskRow(widget, item) {
   image.imageSize = new Size(9, 9);
   image.tintColor = Color.white();
 
-  row.addSpacer(compact ? 7 : 8);
+  row.addSpacer(compact ? 6 : 7);
 
   const title = row.addText(String(item.title || ''));
   title.font = Font.semiboldSystemFont(compact ? 11.5 : 12);
-
-  // Font fisso: niente riduzione automatica.
-  // Il testo può andare a capo fino a due righe; oltre viene troncato con …
   title.lineLimit = 2;
   title.minimumScaleFactor = 1;
-
   title.textColor = Color.dynamic(
     new Color(COLORS.ink),
     Color.white()
@@ -445,14 +428,14 @@ function addTimelineRow(widget, item, isLast) {
   const row = widget.addStack();
   row.layoutHorizontally();
   row.topAlignContent();
-  row.size = new Size(0, compact ? 28 : 30);
+  row.size = new Size(0, compact ? 27 : 29);
 
   const rail = row.addStack();
   rail.layoutVertically();
   rail.centerAlignContent();
   rail.size = new Size(
-    compact ? 11 : 13,
-    compact ? 28 : 30
+    compact ? 10 : 12,
+    compact ? 27 : 29
   );
 
   const dot = rail.addText('●');
@@ -467,7 +450,7 @@ function addTimelineRow(widget, item, isLast) {
     const line = lineRow.addStack();
     line.size = new Size(
       1,
-      compact ? 16 : 19
+      compact ? 15 : 17
     );
     line.backgroundColor = Color.dynamic(
       new Color(COLORS.line),
@@ -484,14 +467,14 @@ function addTimelineRow(widget, item, isLast) {
   when.backgroundColor = reminderAccent(item);
   when.cornerRadius = compact ? 5 : 6;
   when.setPadding(
-    compact ? 2 : 3,
-    compact ? 4 : 5,
-    compact ? 2 : 3,
-    compact ? 4 : 5
+    1,
+    compact ? 3 : 4,
+    1,
+    compact ? 3 : 4
   );
   when.size = new Size(
-    compact ? 45 : 53,
-    compact ? 25 : 29
+    compact ? 43 : 51,
+    compact ? 24 : 28
   );
 
   const date = when.addText(reminderDate(item));
@@ -531,7 +514,7 @@ function addMoreRow(widget, remaining) {
   if (remaining <= 0) return;
 
   const compact = (config.widgetFamily || 'medium') === 'small';
-  widget.addSpacer(compact ? 1 : 3);
+  widget.addSpacer(compact ? 1 : 2);
 
   const more = widget.addText(`+ ${remaining} altri`);
   more.font = Font.semiboldSystemFont(compact ? 9.1 : 10);
@@ -639,21 +622,13 @@ function buildFinance(widget, finance) {
 
   const left = row.addStack();
   left.layoutVertically();
-  addMetric(
-    left,
-    'Spese',
-    formatEuro(finance.monthExpenses)
-  );
+  addMetric(left, 'Spese', formatEuro(finance.monthExpenses));
 
   row.addSpacer();
 
   const right = row.addStack();
   right.layoutVertically();
-  addMetric(
-    right,
-    'Residuo budget',
-    formatEuro(finance.budgetRemaining)
-  );
+  addMetric(right, 'Residuo budget', formatEuro(finance.budgetRemaining));
 
   widget.addSpacer(9);
 

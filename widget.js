@@ -99,10 +99,10 @@ async function loadReminders(accessToken, env) {
     timeMax: future.toISOString()
   });
 
+  const personalId = personalCalendarId(env);
   const sharedUrl = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(CALENDAR_ID)}/events?${params}`;
   const shared = await googleJson(sharedUrl, accessToken);
 
-  const personalId = personalCalendarId(env);
   let personal = { items: [] };
   let personalConnected = false;
   if (personalId && personalId !== CALENDAR_ID) {
@@ -115,14 +115,26 @@ async function loadReminders(accessToken, env) {
     }
   }
 
-  const visible = mergeCalendarItems(shared.items || [], personal.items || [])
+  const [colors, sharedCalendar, personalCalendar] = await Promise.all([
+    calendarColorsJson(accessToken),
+    calendarListEntry(CALENDAR_ID, accessToken),
+    personalConnected ? calendarListEntry(personalId, accessToken) : Promise.resolve(null)
+  ]);
+
+  const sharedItems = decorateCalendarEvents(shared.items || [], 'shared', sharedCalendar, colors, '#039BE5');
+  const personalItems = decorateCalendarEvents(personal.items || [], 'personal', personalCalendar, colors, '#7986CB');
+
+  const visible = mergeCalendarItems(sharedItems, personalItems)
     .filter(event => event.status !== 'cancelled' && event.id && !done.has(event.id))
     .map(event => ({
       id: event.id,
       title: String(event.summary || '(Senza titolo)'),
       note: String(event.description || ''),
       start: event.start?.dateTime || event.start?.date || null,
-      allDay: !!(event.start?.date && !event.start?.dateTime)
+      allDay: !!(event.start?.date && !event.start?.dateTime),
+      color: event.personalOSColor,
+      personalOSColor: event.personalOSColor,
+      calendar: event.personalOSCalendar
     }))
     .filter(event => event.start);
 
@@ -143,6 +155,44 @@ function personalCalendarId(env) {
     .split(',')
     .map(value => value.trim().toLowerCase())
     .find(Boolean) || '';
+}
+
+function decorateCalendarEvents(items, source, calendar, colors, fallbackColor) {
+  const calendarColor = normalizeCalendarColor(
+    calendar?.backgroundColor || colors?.calendar?.[calendar?.colorId]?.background,
+    fallbackColor
+  );
+  return items.map(event => ({
+    ...event,
+    personalOSCalendar: source,
+    personalOSColor: normalizeCalendarColor(
+      colors?.event?.[event?.colorId]?.background,
+      calendarColor
+    )
+  }));
+}
+
+function normalizeCalendarColor(value, fallback) {
+  const color = String(value || '').trim();
+  return /^#[0-9a-f]{6}$/i.test(color) ? color : fallback;
+}
+
+async function calendarColorsJson(accessToken) {
+  try {
+    return await googleJson('https://www.googleapis.com/calendar/v3/colors', accessToken);
+  } catch {
+    return { calendar: {}, event: {} };
+  }
+}
+
+async function calendarListEntry(calendarId, accessToken) {
+  if (!calendarId) return null;
+  const url = `https://www.googleapis.com/calendar/v3/users/me/calendarList/${encodeURIComponent(calendarId)}?colorRgbFormat=true`;
+  try {
+    return await googleJson(url, accessToken);
+  } catch {
+    return null;
+  }
 }
 
 function mergeCalendarItems(sharedItems, personalItems) {

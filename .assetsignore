@@ -3,5 +3,7 @@
 .assetsignore
 worker.js
 wrangler.jsonc
+prepare-secrets.mjs
+.secrets.json
 README*
 node_modules/

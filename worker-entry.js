@@ -1,5 +1,8 @@
 import appWorker, { withSecurityHeaders } from './worker.js';
-import { handleWidget } from './widget.js';
+import {
+  handleUnifiedWidget,
+  handleWidgetCredential
+} from './widget-user.js';
 import {
   handleFinanceProxy,
   injectFinanceSessionBridge,
@@ -16,9 +19,24 @@ export default {
     const url = new URL(request.url);
     if (url.protocol !== 'https:') return appWorker.fetch(request, env, ctx);
 
+    if (url.pathname === '/api/widget/credential') {
+      try {
+        return withSecurityHeaders(await handleWidgetCredential(request, env));
+      } catch (error) {
+        console.error('Widget credential error', error);
+        return withSecurityHeaders(new Response(JSON.stringify({ error: 'Errore creazione credenziale widget.' }), {
+          status: 500,
+          headers: {
+            'Content-Type': 'application/json; charset=utf-8',
+            'Cache-Control': 'private, no-store'
+          }
+        }));
+      }
+    }
+
     if (url.pathname === '/api/widget') {
       try {
-        return withSecurityHeaders(await handleWidget(request, env));
+        return withSecurityHeaders(await handleUnifiedWidget(request, env));
       } catch (error) {
         console.error('Widget API error', error);
         return withSecurityHeaders(new Response(JSON.stringify({ error: 'Errore interno widget.' }), {
